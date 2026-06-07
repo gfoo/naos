@@ -66,7 +66,7 @@ pour le détail des concepts et critères.
 
 | Partie | Brique | Statut |
 |--------|--------|--------|
-| 0  | B0 — Setup & "It boots" (toolchain, Makefile, structure) | à venir |
+| 0  | B0 — Setup & "It boots" (toolchain, Makefile, structure) | ✅ fait |
 | 1  | B1 — Boot sector maison (real mode → mode protégé) | à venir |
 | 2  | B2 — GRUB/Multiboot + kernel C | à venir |
 | 3  | B3 — Driver écran VGA | à venir |
