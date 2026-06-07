@@ -1,6 +1,9 @@
 # Artefacts de build
 build/
 
+# Réglages locaux Claude Code (conservés hors versionnement et hors distclean)
+.claude/settings.local.json
+
 # Sources/outils du toolchain (construits localement, hors repo)
 *.o
 *.bin
