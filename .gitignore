@@ -1,0 +1,8 @@
+# Artefacts de build
+build/
+
+# Sources/outils du toolchain (construits localement, hors repo)
+*.o
+*.bin
+*.img
+*.iso
