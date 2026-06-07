@@ -71,8 +71,8 @@ Chaque brique : théorie → code → vérification observable dans QEMU.
 
 > **B11/B12 sont des briques de "souveraineté", à faire une fois l'OS fonctionnel** —
 > pas en début de projet (cf. DESIGN-LOG 2026-06-07). B11 ferme la dernière couture tierce
-> de la chaîne de boot (GRUB) ; B12 migre vers x86-64 par cohérence avec le MANIFESTO
-> (« construit entièrement », jusqu'à son propre loader UEFI → 64-bit naturel).
+> de la chaîne de boot (GRUB) ; B12 migre vers x86-64 par cohérence avec l'objectif
+> « tout construire soi-même » (jusqu'à son propre loader UEFI → 64-bit naturel).
 
 > Au-delà (planifié plus tard) : appels système, ring 3, système de fichiers, exécution
 > de programmes utilisateur.

@@ -12,9 +12,9 @@
 - 32-bit suffisant pour un projet pédagogique.
 - Le 64-bit forcerait l'activation du paging *avant même* d'entrer en long mode → noie
   l'apprentissage des fondamentaux. Le higher-half (B8) reste simple en 32-bit.
-- Tension notée pour plus tard : le MANIFESTO (« OS construit entièrement », jusqu'à son
-  propre bootloader UEFI) pousserait vers le 64-bit pour cohérence. À reconsidérer si on
-  décide d'écrire notre propre loader UEFI. Reporté.
+- Tension notée pour plus tard : l'objectif « tout construire soi-même » (OS entièrement
+  maison, jusqu'à son propre bootloader UEFI) pousserait vers le 64-bit pour cohérence. À
+  reconsidérer si on décide d'écrire notre propre loader UEFI. Reporté.
 
 ### C2 — Émulateur : QEMU + Bochs ✅
 - **QEMU** = runner quotidien (`make run`), rapide, stub GDB.
@@ -114,7 +114,7 @@ ON → CPU exécute 0xFFFFFFF0 (règle CPU) → carte mère route vers la ROM
   commence où le firmware nous donne la main.
 - Coût du « tout maison » : écrire les parties ingrates que GRUB offrait (lecture disque
   bas-niveau, parsing ELF, détection mémoire). Plus de travail, parfois peu instructif
-  passé la première fois — mais cohérent avec le MANIFESTO.
+  passé la première fois — mais cohérent avec l'objectif « tout construire soi-même ».
 
 ### Standards indépendants des fournisseurs (ce qui rend l'OS portable)
 - Architecture x86 (Intel/AMD), convention PC/AT (héritage IBM 1984 : `int 0x10`/`0x13`,
@@ -214,7 +214,7 @@ firmware. Ce qu'on fixe vs ce que QEMU apporte :
   le faire *après* (avec une référence qui boote) = risque divisé par dix. Le « tout maison »
   n'est pas abandonné, juste **différé** à une brique tardive.
   → Ajout **B11 — Bootloader maison (optionnel, tardif)** : remplacer GRUB, code E820 maison.
-- **Question C1 (32 vs 64-bit, cohérence MANIFESTO)** → **tranché : on reste 32-bit** pour toute
+- **Question C1 (32 vs 64-bit, cohérence avec l'objectif tout-maison)** → **tranché : on reste 32-bit** pour toute
   la feuille de route principale. La migration 64-bit est **différée** à une brique tardive.
   → Ajout **B12 — Passage en 64-bit (optionnel, tardif)** : long mode, paging pré-long-mode,
   GDT 64-bit, toolchain `x86_64-elf`. Cohérent avec « construit entièrement » (loader UEFI maison
