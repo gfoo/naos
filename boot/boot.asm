@@ -5,6 +5,9 @@
 ;
 ; Le BIOS charge ce secteur (512 octets) à l'adresse 0x7C00 et y saute, alors
 ; que le CPU est en real mode 16 bits. Le mode protégé, la GDT, etc. : c'est B1.
+;
+; Explication ligne par ligne + rappels d'assembleur x86 :
+;   docs/HOWTO.md, section « Annexes » (A : rappels x86 ; B : ce fichier commenté).
 
 bits 16                 ; le CPU démarre en real mode (16 bits)
 org  0x7C00             ; le BIOS charge ce secteur à 0x7C00 -> on s'aligne dessus
