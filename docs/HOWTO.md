@@ -163,6 +163,9 @@ mkdir -p boot kernel include toolchain build
 
 #### 3. Écrire le boot sector — `boot/boot.asm`
 
+> **Nouveau ou rouillé en assembleur ?** Le code ci-dessous est expliqué **ligne par ligne**
+> dans les [Annexes](#annexes) (A : rappels x86 ; B : `boot.asm` commenté). À lire en parallèle.
+
 ```nasm
 bits 16                 ; le CPU démarre en real mode (16 bits)
 org  0x7C00             ; le BIOS charge ce secteur à 0x7C00 -> on s'aligne dessus
