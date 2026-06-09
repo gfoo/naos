@@ -13,7 +13,7 @@ BOOT_DIR := boot
 BOOT_BIN := $(BUILD)/boot.bin
 IMAGE    := $(BUILD)/naos.img
 
-.PHONY: all run clean distclean
+.PHONY: all run debug clean distclean
 
 all: $(IMAGE)
 
@@ -32,6 +32,12 @@ $(BUILD):
 # Lance QEMU sur l'image brute. Le BIOS (SeaBIOS) charge le secteur 0 à 0x7C00.
 run: $(IMAGE)
 	$(QEMU) -drive format=raw,file=$(IMAGE)
+
+# Lance QEMU figé, en attente d'un débogueur GDB.
+#   -s : ouvre un stub GDB sur le port 1234   -S : gèle le CPU au démarrage
+# Dans un autre terminal :  gdb -> target remote :1234 -> b *0x7c00 -> continue
+debug: $(IMAGE)
+	$(QEMU) -drive format=raw,file=$(IMAGE) -s -S
 
 clean:
 	rm -rf $(BUILD)

@@ -11,6 +11,7 @@
   - [Prérequis](#prérequis)
 - [Comment lire ce guide](#comment-lire-ce-guide)
 - [Les briques](#les-briques)
+- [Partie 0 — Setup, QEMU & premier boot](#partie-0--setup-qemu--premier-boot)
 - [Annexes](#annexes)
 
 ## Objectif
@@ -83,71 +84,66 @@ pour le détail des concepts et critères.
 
 ---
 
-<!-- Les Parties 0 à 12 sont ajoutées ici, une par brique, au moment où la brique est
+<!-- Les Parties 1 à 12 sont ajoutées ici, une par brique, au moment où la brique est
      réalisée et vérifiée dans QEMU. Chacune suit le squelette ci-dessus. -->
 
-## Partie 0 — Setup & « It boots »
+## Partie 0 — Setup, QEMU & premier boot
 
-### Concept
+B0 a un seul but : avoir une **chaîne de build qui marche** et la **preuve** qu'on peut
+exécuter notre propre code sur la machine (émulée). Pas encore de mode protégé, de GDT ni de
+C — ce sera B1 et B2. Ici, on pose le décor et on fait afficher une ligne à un boot sector.
 
-Avant d'écrire un OS, il faut une **chaîne de build qui marche** et la preuve qu'on
-peut exécuter notre propre code sur la machine (émulée). C'est tout l'objet de B0.
+**Dans cette partie :**
+- 0.1 — Le décor : QEMU, un PC complet en logiciel
+- 0.2 — La chaîne complète : du bouton power à ton code
+- 0.3 — Le boot sector, construit pas à pas
+- 0.4 — L'affichage en profondeur (le grand oublié)
+- 0.5 — Lire le binaire avec `hexdump`
+- 0.6 — Vérifier dans QEMU
 
-La chaîne, du fichier source à l'écran :
+**Termes clés (référence rapide) :**
 
-```
-boot/boot.asm  --(nasm -f bin)-->  boot.bin (512 octets bruts)
-                                       │  copie
-                                       ▼
-                                  naos.img (image disque)
-                                       │  qemu charge le disque
-                                       ▼
-        SeaBIOS lit le secteur 0 -> le pose à 0x7C00 -> vérifie 0xAA55 -> y saute
-                                       │
-                                       ▼
-                          NOTRE code s'exécute (affiche un message, puis halte)
-```
-
-On reste **minimal** : un boot sector en assembleur qui affiche une ligne via un
-service du BIOS, puis arrête le CPU. Pas encore de mode protégé, de GDT ni de C —
-ce sera B1 et B2. B0 prouve seulement que *tout le pipeline* fonctionne.
-
-### Termes clés
-
-- **Real mode** — le mode 16 bits dans lequel le CPU démarre, compatible avec le
-  8086 de 1980. Le BIOS et nos premières instructions y tournent.
+- **Real mode** — le mode 16 bits dans lequel le CPU démarre, compatible 8086 (1978).
+- **Firmware** — le logiciel gravé dans la machine, qui s'exécute avant tout OS (ici SeaBIOS, fourni par QEMU).
 - **Boot sector** — les 512 premiers octets d'un disque bootable.
-- **`0x7C00`** — l'adresse mémoire où le BIOS charge le boot sector (convention figée
-  depuis l'IBM PC de 1981).
-- **`0xAA55`** — la signature obligatoire aux offsets 510-511 ; sans elle, le BIOS
-  considère le disque comme non-bootable.
-- **Binaire plat** — du code machine brut, sans en-tête de format (pas d'ELF). Le BIOS
-  ne sait pas parser un format ; il copie des octets et saute dedans.
-- **`int 0x10`** — interruption logicielle fournie par le BIOS pour l'affichage. La
-  fonction `0x0E` (téléscripteur) écrit un caractère à l'écran.
+- **`0x7C00`** — l'adresse où le firmware charge le boot sector (convention IBM, 1981).
+- **`0xAA55`** — signature obligatoire aux offsets 510-511, sinon disque non-bootable.
+- **Binaire plat** — du code machine brut, sans en-tête de format (pas d'ELF).
+- **`int 0x10`** — service d'affichage fourni par le BIOS (real mode uniquement).
+- **`0xB8000`** — la mémoire vidéo texte (ce que le matériel VGA affiche).
 
-### Étapes reproductibles
+---
 
-#### 1. Installer les dépendances (Debian/Ubuntu)
+### 0.1 — Le décor : QEMU, un PC complet en logiciel
+
+QEMU n'est pas « un lanceur de programme » : c'est un **ordinateur entier émulé en logiciel**,
+firmware compris. Faire `make run`, c'est *allumer un PC virtuel*.
+
+Ce que tu fixes, et ce que QEMU fournit tout seul :
+
+| Composant | Comment / flag | Tu le fournis ? |
+|---|---|---|
+| CPU | `qemu-system-i386` (x86 32 bits) | tu le choisis |
+| RAM | `-m 128M` (défaut suffisant) | optionnel |
+| Disque | `-drive format=raw,file=...` | **oui** (notre image) |
+| **ROM + firmware** | **SeaBIOS, chargé d'office** | ❌ non — QEMU le donne |
+| Écran VGA, clavier PS/2 | automatiques | non |
+
+#### Installer les dépendances (Debian/Ubuntu)
 
 B0 ne requiert que l'assembleur **NASM** et l'émulateur **QEMU**.
 
-> **`apt install nasm qemu-system-x86`** — installe l'assembleur NASM et la suite QEMU
-> (qui fournit `qemu-system-i386`, notre émulateur 32 bits).
+> **`apt install nasm qemu-system-x86`** — installe NASM et la suite QEMU (qui fournit
+> `qemu-system-i386`, notre émulateur 32 bits).
 
 ```bash
 sudo apt update
 sudo apt install -y nasm qemu-system-x86
-```
-
-Vérifiez :
-
-```bash
 nasm --version
 qemu-system-i386 --version
 ```
 
-#### 2. Créer la structure du projet
+#### Créer la structure du projet
 
 ```bash
 mkdir -p boot kernel include toolchain build
@@ -158,17 +154,201 @@ mkdir -p boot kernel include toolchain build
 | `boot/` | code d'amorçage (assembleur) |
 | `kernel/` | code du noyau (C, à partir de B2) |
 | `include/` | en-têtes partagés |
-| `toolchain/` | scripts d'outillage (cross-compiler) |
+| `toolchain/` | scripts d'outillage (cross-compiler, pour B2) |
 | `build/` | artefacts générés (ignoré par git) |
 
-#### 3. Écrire le boot sector — `boot/boot.asm`
+#### La commande de lancement, flag par flag
 
-> **Nouveau ou rouillé en assembleur ?** Le code ci-dessous est expliqué **ligne par ligne**
-> dans les [Annexes](#annexes) (A : rappels x86 ; B : `boot.asm` commenté). À lire en parallèle.
+> **`qemu-system-i386 -drive format=raw,file=build/naos.img`** — allume un PC virtuel x86
+> 32 bits avec notre image comme disque dur.
+
+- `qemu-system-i386` : l'émulateur, CPU x86 32 bits.
+- `-drive format=raw,file=...` : branche notre image comme disque. `raw` = octets bruts (pas
+  un format compressé type `qcow2`).
+- Le **firmware (SeaBIOS) est chargé automatiquement** — on ne le précise jamais.
+
+Des flags qui resserviront (debug et vérification) :
+
+| Flag | Rôle |
+|---|---|
+| `-display none` | pas de fenêtre (mode « headless ») |
+| `-no-reboot` | **quitter** au lieu de redémarrer → révèle les triple-faults |
+| `-d int,cpu_reset -D fichier.log` | journalise interruptions et resets CPU |
+| `-s` | ouvre un stub **GDB** sur le port 1234 |
+| `-S` | **gèle** le CPU au démarrage (attend GDB) |
+| `-qmp unix:sock,server,nowait` | pilotage programmatique (capture d'écran, état) |
+
+Le `Makefile` expose deux cibles principales :
+
+> **`make run`** — assemble, fabrique l'image, lance QEMU (fenêtre normale).
+> **`make debug`** — lance QEMU **figé** (`-s -S`), en attente d'un GDB sur `:1234`.
+
+```bash
+make run     # itération quotidienne
+make debug   # puis, dans un autre terminal :
+             #   gdb -> target remote :1234 -> b *0x7c00 -> continue
+```
+
+> **Pourquoi `make debug` ?** En real mode (B0/B1), il n'y a ni `printf` ni message d'erreur.
+> GDB te laisse poser un point d'arrêt à `0x7c00` et avancer **instruction par instruction**
+> pour voir les registres. Pour les bugs plus retors de B1 (triple-fault), on sortira
+> **Bochs** (cf. `DESIGN-LOG.md`, C2), dont le débogueur dit *pourquoi* ça plante.
+
+> **(Optionnel, pour B2) Le cross-compiler.** B0 n'en a pas besoin (boot sector NASM pur),
+> mais on peut le préparer : `./toolchain/build-i686-elf.sh` construit `i686-elf-gcc` dans
+> `~/opt/cross` (~20-40 min). À lancer une seule fois, avant B2.
+
+---
+
+### 0.2 — La chaîne complète : du bouton power à ton code
+
+Il faut distinguer **deux** chaînes : celle de *fabrication* (sur ta machine) et celle
+d'*exécution* (dans QEMU).
+
+#### (a) La chaîne de build — du texte aux octets
+
+```
+boot/boot.asm   (TEXTE, lisible)
+     │  nasm -f bin        ← traduit le texte en octets machine
+     ▼
+build/boot.bin  (512 OCTETS bruts)
+     │  cp
+     ▼
+build/naos.img  (le "disque" que QEMU monte)
+                 └── son secteur 0 = ces 512 octets
+```
+
+- Un **secteur** = un bloc de 512 octets sur le disque. Le **secteur 0** = le boot sector.
+  Notre « disque » ne fait qu'un seul secteur.
+- **`boot.asm` (texte) ne va jamais sur le disque** : c'est `boot.bin` (sa traduction) qui y
+  va. Le `.asm` est la recette, le `.bin` est le plat.
+
+#### (b) La chaîne d'exécution — de l'allumage à `0x7C00`
+
+```
+power on
+  ▼  0xFFFFFFF0   ← LE CPU démarre ICI (reset vector, câblé par Intel) = le FIRMWARE
+SeaBIOS : POST → cherche un disque bootable → lit le secteur 0
+  ▼  copie les 512 octets à 0x7C00, vérifie 0xAA55, puis jmp 0x7C00
+NOTRE code démarre ICI   ← 0x7C00
+```
+
+Deux « départs » à ne pas confondre :
+
+| Adresse | Départ de quoi | Qui la fixe |
+|---|---|---|
+| `0xFFFFFFF0` | du **CPU** (le firmware) au power-on | câblé Intel/AMD — on n'y touche jamais |
+| `0x7C00` | de **notre** code | convention IBM 1981 — notre porte d'entrée |
+
+#### Trois idées qui rendent la suite limpide
+
+> **Pourquoi `jmp` n'est pas magique.** Le CPU est une boucle infinie : *lire l'instruction
+> à `CS:IP`, l'exécuter, avancer `IP`, recommencer*. Un `jmp X` écrit simplement `X` dans
+> `IP`. « SeaBIOS saute à `0x7C00` » = il met `0x7C00` dans `IP`, et le flux d'exécution
+> (qui n'a jamais cessé) continue dans *nos* octets.
+
+> **Un label = une adresse.** `start`, `.print` n'existent que dans le source ; NASM les
+> remplace par des nombres. Le firmware ne connaît pas nos labels — il saute à une adresse
+> **en dur** (`0x7C00`), un nombre convenu d'avance entre deux binaires étrangers.
+
+> **Code et données = les mêmes octets.** Le CPU décode comme « instruction » ce sur quoi
+> `IP` tombe. Rien ne distingue physiquement du code d'une chaîne de texte — d'où
+> l'importance de placer nos données *après* le `hlt` (sinon le CPU les exécuterait).
+
+---
+
+### 0.3 — Le boot sector, construit pas à pas
+
+> **Point clé — la bonne méthode.** N'écris **jamais** le boot sector complet d'un coup.
+> Ajoute un petit bout, lance `make run`, observe, recommence. Le jour où ça plante, tu sais
+> que c'est ton dernier ajout — pas un mystère parmi 30 lignes. On construit ici en 4
+> incréments ; **teste après chacun**.
+
+#### Étape a — le squelette qui boote (et ne fait rien)
 
 ```nasm
 bits 16                 ; le CPU démarre en real mode (16 bits)
-org  0x7C00             ; le BIOS charge ce secteur à 0x7C00 -> on s'aligne dessus
+org  0x7C00             ; on s'aligne sur l'adresse de chargement du BIOS
+
+start:
+    hlt                 ; arrête le CPU
+    jmp start           ; ... et reboucle s'il est réveillé
+
+times 510-($-$$) db 0   ; padding jusqu'à l'octet 510
+dw 0xAA55               ; signature de boot (offsets 510-511)
+```
+
+`make run` → SeaBIOS affiche `Booting from Hard Disk...`, puis **écran noir**, sans rien
+d'autre. C'est normal : on n'affiche rien encore.
+
+> **Que vérifie cette étape ?** Deux choses, sans afficher : (1) **pas** de « No bootable
+> device » → la signature `0xAA55` est reconnue, notre secteur *est* bootable ; (2) **pas**
+> de redémarrage en boucle → on a bien atteint `hlt`, donc notre code s'exécute. Le pipeline
+> complet (build → image → QEMU → notre code) tourne.
+
+#### Étape b — afficher UN caractère
+
+```nasm
+bits 16
+org  0x7C00
+
+start:
+    mov ah, 0x0E        ; fonction "téléscripteur" du service vidéo BIOS
+    mov al, 'X'         ; le caractère à afficher
+    int 0x10            ; appel du BIOS -> il affiche AL
+
+.hang:
+    hlt
+    jmp .hang
+
+times 510-($-$$) db 0
+dw 0xAA55
+```
+
+`make run` → un `X` apparaît sous les lignes de SeaBIOS. **Preuve : on sait appeler le
+firmware (`int 0x10`) et il affiche.** (Voir 0.4 pour ce que `int 0x10` fait vraiment.)
+
+#### Étape c — afficher une CHAÎNE (la boucle)
+
+```nasm
+bits 16
+org  0x7C00
+
+start:
+    mov si, msg         ; SI pointe sur le début de la chaîne
+.print:
+    lodsb               ; AL = [SI], puis SI++
+    test al, al         ; octet nul ? -> fin de chaîne
+    jz .hang
+    mov ah, 0x0E
+    int 0x10
+    jmp .print          ; caractère suivant
+
+.hang:
+    hlt
+    jmp .hang
+
+msg db "naos B0: it boots!", 13, 10, 0   ; 13,10 = CR LF ; 0 = fin
+times 510-($-$$) db 0
+dw 0xAA55
+```
+
+`make run` → le message complet. **Preuve : la boucle d'affichage et la donnée `msg`.**
+
+> **Pourquoi `msg` *après* `.hang` ?** Parce que le CPU exécute en séquence : s'il
+> rencontrait les octets de la chaîne, il les décoderait comme des instructions (charabia,
+> puis plantage). En la plaçant après la boucle d'arrêt, le CPU ne l'atteint jamais comme code
+> — seul `lodsb` la *lit comme donnée*.
+
+#### Étape d — le rituel propre (segments + pile)
+
+Jusqu'ici on a eu de la chance : les segments et la pile étaient dans un état utilisable
+laissé par le BIOS. Pour être **robuste** (et indispensable dès qu'on touchera à la pile), on
+les initialise explicitement. C'est le `boot/boot.asm` **final** de B0 :
+
+```nasm
+bits 16
+org  0x7C00
 
 start:
     cli                 ; pas d'interruptions pendant qu'on installe les segments
@@ -179,117 +359,220 @@ start:
     mov sp, 0x7C00      ; pile juste sous notre code (croît vers le bas)
     sti                 ; on réautorise les interruptions (le BIOS en a besoin)
 
-    mov si, msg         ; SI pointe sur la chaîne à afficher
+    mov si, msg
 .print:
-    lodsb               ; AL = [DS:SI], puis SI++
-    test al, al         ; octet nul ? -> fin de chaîne
+    lodsb
+    test al, al
     jz .hang
-    mov ah, 0x0E        ; int 0x10, fonction 0x0E = téléscripteur (affiche AL)
+    mov ah, 0x0E        ; téléscripteur
     mov bh, 0x00        ; page vidéo 0
-    int 0x10            ; service BIOS d'affichage
+    int 0x10
     jmp .print
 
 .hang:
-    hlt                 ; arrête le CPU jusqu'à la prochaine interruption
-    jmp .hang           ; si réveillé, on se rendort : boucle d'arrêt propre
+    hlt
+    jmp .hang
 
-msg db "naos B0: it boots!", 13, 10, 0   ; 13,10 = CR LF ; 0 = fin de chaine
-
-times 510-($-$$) db 0   ; padding : zéros jusqu'à l'octet 510
-dw 0xAA55               ; signature little-endian -> octets 0x55 0xAA
+msg db "naos B0: it boots!", 13, 10, 0
+times 510-($-$$) db 0
+dw 0xAA55
 ```
 
-> **Pourquoi `org 0x7C00` ?** L'assembleur calcule l'adresse de `msg` en partant de cette
-> base. Si on l'oubliait, `mov si, msg` pointerait à la mauvaise adresse et on afficherait
-> n'importe quoi. On dit à NASM « ce code vivra à 0x7C00 » parce que c'est là que le BIOS
-> le met.
+> **Pourquoi ce rituel ?** `cli` : pas d'interruption sur une pile encore incohérente.
+> Segments à 0 : adressage simple en offsets absolus. `sp = 0x7C00` : la pile grandit *sous*
+> notre code, sans l'écraser. `sti` : on réautorise les interruptions, dont `int 0x10` a
+> besoin. **Détail ligne par ligne en [Annexe B](#annexe-b--bootbootasm-ligne-par-ligne).**
 
-> **Pourquoi `hlt` puis `jmp` ?** `hlt` met le CPU en pause (économie d'énergie) jusqu'à une
-> interruption. Si une interruption le réveille, le `jmp` le renvoie dormir. Sans cette
-> boucle, le CPU exécuterait les octets suivants (le padding, des zéros = `add [bx+si],al`)
-> et finirait par planter.
+> **Nouveau ou rouillé en assembleur ?** Voir l'[Annexe A](#annexe-a--rappels-dassembleur-x86-real-mode-16-bits)
+> (registres, real mode, syntaxe Intel, instructions, directives NASM).
 
-#### 4. Écrire le `Makefile`
+---
 
-```makefile
-NASM ?= nasm
-QEMU ?= qemu-system-i386
+### 0.4 — L'affichage en profondeur
 
-BUILD    := build
-BOOT_DIR := boot
-BOOT_BIN := $(BUILD)/boot.bin
-IMAGE    := $(BUILD)/naos.img
+On a affiché via `int 0x10`. Mais que se passe-t-il *vraiment* ? Il faut séparer **deux
+acteurs** : le **firmware** (logiciel) et le **matériel VGA**.
 
-.PHONY: all run clean
-all: $(IMAGE)
+#### `int 0x10` = un APPEL au firmware
 
-$(BOOT_BIN): $(BOOT_DIR)/boot.asm | $(BUILD)
-	$(NASM) -f bin $< -o $@
+Ce n'est pas un « registre écran » que le firmware surveille — c'est une **routine qu'on
+invoque**. Elle ne s'exécute que quand on l'appelle, fait son travail, et rend la main. Ses
+paramètres passent par les registres : `AH` = la fonction (`0x0E` = téléscripteur), `AL` = le
+caractère, `BH` = la page vidéo.
 
-$(IMAGE): $(BOOT_BIN)
-	cp $(BOOT_BIN) $(IMAGE)
+> **`BH`, c'est quoi ?** Juste l'octet haut de `BX`. Son sens « page vidéo » n'existe que dans
+> la **convention de `int 0x10`** (un standard *du BIOS*, pas des cartes). La *capacité*
+> « pages » vient du matériel VGA (assez de mémoire pour plusieurs écrans) ; le firmware
+> l'expose via `BH`. On met `BH=0` = page affichée par défaut.
 
-$(BUILD):
-	mkdir -p $(BUILD)
+#### Ce que le firmware fait sous le capot : écrire dans la mémoire vidéo
 
-run: $(IMAGE)
-	$(QEMU) -drive format=raw,file=$(IMAGE)
+L'écran texte est **mappé en mémoire** à **`0xB8000`**. Cette adresse n'est pas de la RAM :
+c'est la **mémoire de la carte VGA**. Le contrôleur VGA **lit cette zone en continu** (~60×/s)
+et dessine à l'écran ce qu'il y trouve. `int 0x10` ne fait, au fond, qu'**écrire dans
+`0xB8000`** pour toi (en gérant en plus le curseur et le défilement).
 
-clean:
-	rm -rf $(BUILD)
+**2 octets par case d'écran :**
+
+```
+0xB8000 : 0x41   ← le CODE du caractère ('A' = 0x41 en ASCII)
+0xB8001 : 0x0F   ← l'ATTRIBUT : couleur (nibble bas = texte, nibble haut = fond)
+                   0x0F = texte blanc (F) sur fond noir (0)
 ```
 
-> **`nasm -f bin`** — assemble en **binaire plat** (pas d'ELF). C'est indispensable ici : le
-> BIOS attend des octets bruts, pas un format.
+Un écran 80×25 = 2000 cases × 2 octets = 4000 octets à partir de `0xB8000`.
 
-> **Point clé — tabulations.** Dans un `Makefile`, les lignes de recette (sous chaque cible)
-> doivent commencer par une **tabulation**, jamais par des espaces. Si vous copiez-collez et
-> obtenez `Makefile:N: *** missing separator. Stop.`, c'est ça : remplacez les espaces de
-> début de ligne par une vraie tabulation.
+#### Comment le VGA « connaît » la forme du 'A' : la police CP437
 
-#### 5. (Optionnel, pour B2) Construire le cross-compiler
+Le matériel ne devine pas la forme — il fait un **lookup dans une table de police** (le
+*character generator*) qui associe chaque code (0–255) à un **bitmap** (grille de ~8×16
+pixels). Pour chaque case : lit le code → trouve le glyphe → peint les pixels avec les
+couleurs de l'attribut. La police par défaut, **CP437**, est chargée au boot par le firmware
+vidéo.
 
-B0 n'en a pas besoin, mais autant le préparer. Le script `toolchain/build-i686-elf.sh`
-télécharge et compile binutils + gcc ciblés `i686-elf` (~20-40 min).
+> **Le « super truc » (à venir en B3).** On pourra **remplacer CP437** par notre propre
+> police : charger nos bitmaps dans le générateur de caractères du VGA → nos propres glyphes
+> en mode texte. C'est un exercice du **pilote écran (B3)**, où l'on programme directement le
+> matériel VGA.
 
-> **`toolchain/build-i686-elf.sh`** — construit le cross-compiler `i686-elf-gcc` dans
-> `~/opt/cross`. À lancer une seule fois.
+#### La chaîne ASCII unifiée
+
+Le même code `0x6E` (le 'n') traverse **tout le système, sans aucune conversion** :
+
+```
+source 'n'  →  NASM: octet 0x6E  →  lodsb: AL=0x6E  →  0xB8000: 0x6E  →  police: glyphe 'n'
+```
+
+ASCII est la **langue commune** de la source, de la mémoire et de l'écran (et du clavier en
+B6). C'est pourquoi écrire `0x6E` à `0xB8000` affiche 'n', sans traduction intermédiaire.
+
+#### Le partage des rôles, et les deux voies
+
+| Qui | Fait quoi |
+|---|---|
+| **toi** | fournis la donnée (code de caractère + attribut couleur) |
+| **matériel VGA** | scrute `0xB8000`, fait le lookup police, peint les pixels |
+| **firmware** | (B0) emballe « écrire dans `0xB8000` » dans `int 0x10` ; a chargé CP437 au boot |
+
+```
+B0 (real mode)    : ton code ──int 0x10──> [BIOS écrit dans 0xB8000] ──> VGA affiche
+B3 (mode protégé) : ton code ──écrit toi-même dans 0xB8000──────────> VGA affiche
+```
+
+> **Point clé — pourquoi `0xB8000` est central.** `int 0x10` (firmware) **disparaît** en mode
+> protégé, mais `0xB8000` (matériel) **marche toujours**, quel que soit le mode CPU. C'est
+> pour ça qu'écrire à `0xB8000` sera la **preuve de B1** (on affiche sans le BIOS) et le cœur
+> du **driver écran de B3**.
+
+---
+
+### 0.5 — Lire le binaire avec `hexdump`
+
+Le secteur final, octet par octet — un excellent réflexe de débogage bas niveau.
+
+> **`xxd build/boot.bin`** — affiche les 512 octets en hexadécimal + ASCII.
 
 ```bash
-# Prérequis de compilation
-sudo apt install -y build-essential bison flex libgmp-dev libmpc-dev \
-                    libmpfr-dev texinfo wget
-# Construction (longue)
-./toolchain/build-i686-elf.sh
-# Puis ajouter au PATH (dans ~/.bashrc) :
-export PATH="$HOME/opt/cross/bin:$PATH"
+make
+xxd build/boot.bin
 ```
 
-### Vérification
+Extrait (le tien peut différer d'un ou deux octets selon la longueur du code) :
 
-> **`make run`** — assemble le boot sector, fabrique l'image, et lance QEMU dessus.
+```
+00000000: fa31 c08e d88e c08e d0bc 007c fbbe 207c  .1.........|.. |
+00000010: ac84 c074 08b4 0eb7 00cd 10eb f3f4 ebfd  ...t............
+00000020: 6e61 6f73 2042 303a 2069 7420 626f 6f74  naos B0: it boot
+00000030: 7321 0d0a 0000 ...                        s!..............
+...
+000001f0: 0000 0000 0000 0000 0000 0000 0000 55aa  ..............U.
+```
+
+On y lit **les 4 blocs** : code (`0x00`–`0x1F`), chaîne (`0x20`–`0x33`), padding (zéros),
+signature `55aa` (offset `0x1FE`).
+
+**Le code, c'est aussi des octets.** Décodage des premiers :
+
+| Octets | Instruction |
+|---|---|
+| `fa` | `cli` |
+| `31 c0` | `xor ax, ax` |
+| `8e d8` / `8e c0` / `8e d0` | `mov ds/es/ss, ax` |
+| `bc 00 7c` | `mov sp, 0x7C00` |
+| `fb` | `sti` |
+| **`be 20 7c`** | **`mov si, 0x7C20`** ← l'adresse de `msg` |
+| `ac` | `lodsb` |
+| `84 c0` / `74 08` | `test al,al` / `jz` |
+| `b4 0e` / `b7 00` / `cd 10` | `mov ah,0x0E` / `mov bh,0x00` / `int 0x10` |
+| `eb f3` | `jmp .print` (saut **relatif** : recule de 13) |
+| `f4` / `eb fd` | `hlt` / `jmp .hang` |
+
+> **Le label est devenu une adresse.** `mov si, msg` s'est encodé `be 20 7c` = `mov si,
+> 0x7C20`. NASM a calculé `msg` = `0x7C00 + 0x20` (grâce à `org`) et l'a gravé **en dur**.
+> Aucune trace du mot « msg » ni « .print » : le binaire ne contient que des nombres.
+
+> **La chaîne est devenue des octets ASCII.** À l'offset `0x20` : `6e 61 6f 73` = 'n' 'a' 'o'
+> 's'. Le `db "naos..."` du source n'est qu'une écriture lisible de ces codes.
+
+---
+
+### 0.6 — Vérifier dans QEMU
+
+**À la main (fenêtre) :**
 
 ```bash
 make run
 ```
 
-Une fenêtre QEMU s'ouvre, affiche les lignes de SeaBIOS, puis :
+SeaBIOS → `Booting from Hard Disk...` → `naos B0: it boots!` → curseur figé (le CPU est en
+`hlt`). **Critère de réussite : le message s'affiche et la machine ne redémarre pas en
+boucle** (un reboot en boucle = triple-fault).
 
+**Sans tête (automatisable, réutilisable à chaque brique) :** on lance QEMU headless, on
+capture l'écran par QMP, et on détecte les triple-faults.
+
+```bash
+rm -f build/qemu.log build/shot.png /tmp/naos-qmp.sock
+qemu-system-i386 -drive format=raw,file=build/naos.img -display none -no-reboot \
+  -qmp unix:/tmp/naos-qmp.sock,server,nowait -d int,cpu_reset -D build/qemu.log &
+QPID=$!
+python3 - <<'PY'
+import socket, json, time
+for _ in range(200):
+    try:
+        s = socket.socket(socket.AF_UNIX); s.connect("/tmp/naos-qmp.sock"); break
+    except OSError: time.sleep(0.02)
+def line():
+    b=b""
+    while b"\n" not in b: b += s.recv(4096)
+    return b
+line()                                                   # message d'accueil QMP
+def cmd(d): s.sendall((json.dumps(d)+"\n").encode()); return line()
+cmd({"execute":"qmp_capabilities"})
+time.sleep(2.5)                                          # laisser SeaBIOS booter (temps réel)
+cmd({"execute":"screendump","arguments":{"filename":"build/shot.png","format":"png"}})
+PY
+kill $QPID 2>/dev/null
+grep -iE "triple|shutdown" build/qemu.log && echo "PLANTAGE" || echo "OK : pas de triple-fault"
 ```
-naos B0: it boots!
-```
 
-Le curseur s'arrête : le CPU est en `hlt`. **Critère de réussite : QEMU démarre, affiche
-le message, et ne redémarre pas en boucle** (un reboot en boucle = triple-fault, signe que
-quelque chose cloche). Fermez la fenêtre pour quitter.
+Ouvre ensuite `build/shot.png` : tu dois y voir `naos B0: it boots!`.
 
-### Pour aller plus loin
+> **Pourquoi le `time.sleep(2.5)` ?** Le boot est quasi instantané en temps *guest*, mais
+> QMP répond bien avant que SeaBIOS ait fini en temps *réel*. Capturer trop tôt donne une
+> image « Guest has not initialized the display (yet) ». On laisse la machine vivre quelques
+> secondes avant la photo.
 
-- B0 utilise le BIOS (`int 0x10`) pour afficher. Ces services n'existent qu'en real mode :
-  dès qu'on passera en mode protégé (B1), ils disparaîtront et on écrira notre propre
-  affichage (B3).
-- **B1** reprend ce boot sector et va jusqu'au bout du démarrage real mode : activation A20,
-  GDT, passage en **mode protégé** 32 bits.
+---
+
+### Pour aller plus loin → B1
+
+- B0 **emprunte** le firmware (`int 0x10`). **B1** va jusqu'au bout du démarrage real mode —
+  activation **A20**, **GDT**, bit **PE** de `CR0`, **far jump** — pour entrer en **mode
+  protégé 32 bits**. Là, `int 0x10` disparaît : on affichera en écrivant directement dans
+  `0xB8000`.
+- L'affichage direct `0xB8000` et le **remplacement de la police CP437** : ce sera le **driver
+  écran (B3)**.
 
 ## Annexes
 
@@ -323,7 +606,8 @@ comprises.
 | `FLAGS` | Drapeaux | résultats de comparaisons (ZF, CF, SF…) |
 
 `AX` est sur 16 bits ; ses moitiés `AH` (bits 8-15) et `AL` (bits 0-7) sont adressables
-séparément. Écrire dans `AL` ne touche pas `AH`.
+séparément. Écrire dans `AL` ne touche pas `AH`. En mode protégé (B1+), ces registres
+s'étendent à 32 bits : `EAX`, et `AX` en est la moitié basse.
 
 **A.3 Real mode et l'adressage `segment:offset`.** En real mode, une adresse physique se
 calcule sur 20 bits :
@@ -380,8 +664,13 @@ l'écraser.
 | `org 0x7C00` | « ce code vivra à 0x7C00 » → base des calculs d'adresse |
 | `db`, `dw`, `dd` | pose des octets / mots (2 o) / double-mots (4 o) bruts |
 | `times N x` | répète `x` N fois (padding) |
-| `label:` | nom symbolique d'une adresse |
+| `label:` | nom symbolique d'une adresse (global) ; `.label` = local au dernier global |
 | `$` / `$$` | adresse courante / début de section (`$-$$` = octets écrits) |
+
+> **Labels globaux vs locaux.** Un label sans point (`start`) est global ; un label avec point
+> (`.print`) est **local**, rattaché au dernier global au-dessus (donc `start.print`). Ça
+> évite les collisions : tu peux réutiliser `.loop`/`.done` dans plusieurs routines. Règle
+> mentale : **global = repères (routines, entrée) ; local (`.`) = cibles de saut internes.**
 
 ### Annexe B — `boot/boot.asm` ligne par ligne
 
