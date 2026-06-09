@@ -325,7 +325,13 @@ dw 0xAA55
 ```
 
 `make run` → un `X` apparaît sous les lignes de SeaBIOS. **Preuve : on sait appeler le
-firmware (`int 0x10`) et il affiche.** (Voir 0.4 pour ce que `int 0x10` fait vraiment.)
+firmware (`int 0x10`) et il affiche.**
+
+> **Comment marche cet appel ?** `int 0x10` est une *fonction générique* : `AH` choisit la
+> sous-fonction (`0x0E` = téléscripteur), `AL` porte le caractère. Mécanisme complet
+> (sélecteur, registres-arguments, table des vecteurs, parallèle syscall) :
+> **[Annexe C — `int 0x10` en détail](#annexe-c--int-0x10-en-détail-services-bios--interruptions)**.
+> Ce que `int 0x10` fait *à l'écran* est détaillé en [0.4](#04--laffichage-en-profondeur).
 
 #### Étape c — afficher une CHAÎNE (la boucle)
 
@@ -417,7 +423,9 @@ acteurs** : le **firmware** (logiciel) et le **matériel VGA**.
 Ce n'est pas un « registre écran » que le firmware surveille — c'est une **routine qu'on
 invoque**. Elle ne s'exécute que quand on l'appelle, fait son travail, et rend la main. Ses
 paramètres passent par les registres : `AH` = la fonction (`0x0E` = téléscripteur), `AL` = le
-caractère, `BH` = la page vidéo.
+caractère, `BH` = la page vidéo. Le mécanisme complet (`AH` = sélecteur de sous-fonction,
+registres = arguments, IVT, parallèle avec les appels système) est détaillé en
+**[Annexe C](#annexe-c--int-0x10-en-détail-services-bios--interruptions)**.
 
 > **`BH`, c'est quoi ?** Juste l'octet haut de `BX`. Son sens « page vidéo » n'existe que dans
 > la **convention de `int 0x10`** (un standard *du BIOS*, pas des cartes). La *capacité*
