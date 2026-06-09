@@ -21,6 +21,7 @@
 - [Annexes](#annexes)
   - [Annexe A — Rappels d'assembleur x86](#annexe-a--rappels-dassembleur-x86-real-mode-16-bits)
   - [Annexe B — `boot.asm` ligne par ligne](#annexe-b--bootbootasm-ligne-par-ligne)
+  - [Annexe C — `int 0x10` en détail](#annexe-c--int-0x10-en-détail-services-bios--interruptions)
 
 ## Objectif
 
@@ -813,3 +814,90 @@ octet 510 = `0x55`, octet 511 = `0xAA`. Sans elle, le BIOS déclare le disque no
 3. **Directive ≠ instruction** : `org`/`times`/`db` parlent à NASM ; `mov`/`int`/`hlt` au CPU.
 4. **`org` est vital** : il aligne les adresses calculées sur l'adresse réelle de chargement.
 5. **Gare le CPU** (`hlt; jmp $`) au lieu de le laisser tomber dans le vide.
+
+### Annexe C — `int 0x10` en détail (services BIOS & interruptions)
+
+Comprendre `int 0x10`, c'est comprendre **tous** les services BIOS (`int 0x13` disque,
+`int 0x16` clavier, `int 0x15` mémoire…) : même mécanisme.
+
+**C.1 Une seule porte, plein de fonctions.** `int 0x10` n'affiche pas « par nature » : c'est
+le **point d'entrée unique des services vidéo** du BIOS, qui sait faire des dizaines de
+choses. Comment sait-il *laquelle* tu veux ? Il **regarde `AH`** :
+
+| `AH` | Fonction | Arguments |
+|---|---|---|
+| `0x00` | changer de mode vidéo | `AL` = mode |
+| `0x02` | positionner le curseur | `BH` = page, `DH` = ligne, `DL` = colonne |
+| `0x06` | faire défiler vers le haut | `AL`, `CX`, `DX`, `BH`… |
+| **`0x0E`** | **téléscripteur (afficher 1 caractère)** | **`AL` = caractère, `BH` = page, `BL` = couleur** |
+| `0x13` | afficher une chaîne | `ES:BP` = chaîne, `CX` = longueur… |
+
+**C.2 Qui décide que `0x0E` = téléscripteur ?** **IBM**, dans la spécification du BIOS de
+1981. C'est une **convention publiée et figée**, clonée par tous les BIOS (SeaBIOS inclus).
+Référence canonique : la *Ralf Brown's Interrupt List*. Ce n'est ni le matériel ni le hasard :
+c'est un **contrat d'API**, un numéro convenu d'avance — comme `0x7C00` ou `0xAA55`.
+
+**C.3 Les registres = les paramètres.** En real mode, pas de passage d'arguments par la pile
+comme en C : **les arguments transitent par les registres**, et la routine BIOS les y lit
+directement. D'où la grille de lecture :
+
+- `int 0x10` = **quel service** (vidéo) ;
+- `AH` = **quelle sous-fonction** (le « sélecteur de méthode ») ;
+- `AL`, `BH`, `BL`… = **les arguments** de cette sous-fonction.
+
+Donc « il affiche `AL` » parce que la spec de la fonction `0x0E` *dit* que le caractère est
+dans `AL`. Le BIOS, voyant `AH=0x0E`, va lire `AL`.
+
+**C.4 Le même bout de code, en Python.** `int 0x10` ≈ une grosse fonction qui *dispatche* sur
+`AH` et lit ses arguments dans des « registres » :
+
+```python
+def int_10h(regs):
+    if regs.AH == 0x00:        # changer de mode vidéo
+        set_video_mode(regs.AL)
+    elif regs.AH == 0x02:      # positionner le curseur
+        set_cursor(page=regs.BH, row=regs.DH, col=regs.DL)
+    elif regs.AH == 0x0E:      # téléscripteur
+        put_char(chr(regs.AL), page=regs.BH)   # <-- lit AL et BH
+        advance_cursor()
+    # ... autres sous-fonctions ...
+```
+
+Et l'assembleur :
+
+```nasm
+mov ah, 0x0E
+mov al, 'X'
+int 0x10
+```
+
+… équivaut **exactement** à :
+
+```python
+regs.AH = 0x0E       # je veux la fonction "téléscripteur"
+regs.AL = ord('X')   # le caractère
+int_10h(regs)        # appel
+```
+
+Les `mov` = « remplir les cases d'arguments » ; `int 0x10` = « appeler la fonction ».
+
+**C.5 Comment `int n` atteint réellement le BIOS : l'IVT.** En real mode, il existe à
+l'adresse `0x0000` une **table des vecteurs d'interruption (IVT)** : 256 entrées, chacune un
+pointeur `segment:offset` vers une routine. `int 0x10` fait : *« va lire l'entrée n°`0x10` de
+l'IVT, et saute à la routine qui y est inscrite »*. Le BIOS a installé sa routine vidéo dans
+ce slot au démarrage. Elle s'exécute, lit tes registres, fait le travail, puis revient avec
+`iret`.
+
+```
+int 0x10  →  CPU lit IVT[0x10]  →  saute à la routine vidéo du BIOS
+          →  la routine lit AH (=0x0E), AL, BH  →  écrit dans 0xB8000  →  iret (retour)
+```
+
+**C.6 C'est l'ancêtre des appels système.** Un syscall Linux, c'est le même patron : `eax` =
+numéro du syscall (le sélecteur), `ebx/ecx/…` = arguments, puis `int 0x80` (ou `syscall`).
+`int 0x10` + `AH` = exactement ça : **un numéro qui dispatche + des registres-arguments + une
+instruction qui transfère la main à du code de service.**
+
+> **Point clé.** `AH`/`AL` sont les deux moitiés d'`AX` : la convention met le **sélecteur**
+> dans `AH` et la **donnée** dans `AL`, ce qui permet de charger les deux d'un coup —
+> `mov ax, 0x0E58` met `AH=0x0E` et `AL=0x58` ('X'). Compact et idiomatique.
