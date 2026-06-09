@@ -272,3 +272,17 @@ Double exigence explicite (plus fort que « explicatif » seul) :
 - **PLAN.md** = le *quoi* (feuille de route, critères, statuts).
 - **DESIGN-LOG.md** = le *pourquoi des choix* (décisions, raisonnements, échanges).
 - **HOWTO.md** = le *comment* (recette rejouable et formatrice, brique par brique).
+
+---
+
+## 2026-06-09 — C6 révisé : commit direct sur `main`
+
+- Après B0 + CHORE-001 menés avec le cycle complet (issue→branche→PR→merge squash), la
+  cérémonie s'avère **trop lourde** pour un projet perso solo. Décision : **commit direct sur
+  `main`**, pas de branche, pas de PR, pas d'issue.
+- Override assumé : contredit la règle globale `workflow.md` (« never write code on main »)
+  et le choix C6 initial. Justifié par le contexte (solo, pédagogique, historique linéaire
+  suffisant). Le `main` n'a aucune protection de branche, donc rien ne bloque.
+- Conventions conservées : messages de commit conventionnels (`feat(Bx):`, `docs:`…).
+- Reste possible ponctuellement si besoin (ex. expérimentation risquée), mais ce n'est plus
+  le défaut.

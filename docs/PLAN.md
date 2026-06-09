@@ -26,7 +26,7 @@
 | C3 | Langages | C (kernel) + NASM (boot & glue) — syntaxe Intel, pas de C++/Rust pour rester aux fondamentaux | ✅ validé |
 | C4 | Stratégie de boot | **Hybride** : boot sector maison (comprendre, jetable) → puis GRUB/Multiboot (déléguer) | ✅ validé |
 | C5 | Toolchain | cross-compiler `i686-elf-gcc` construit dès B0 — zéro hypothèse hôte (reco OSDev) | ✅ validé |
-| C6 | Workflow | **issue→branche→PR par brique** (méthodologie complète) : 1 brique Bx = 1 issue `type:feature` → branche `feature/Bx-...` → commits `feat(Bx):` → PR `Closes #N` → merge squash | ✅ validé |
+| C6 | Workflow | **Commit direct sur `main`** (projet perso solo) : pas de branche/PR/issue ; commits conventionnels `feat(Bx): ...` / `docs: ...`. Révise le choix initial (issue→branche→PR), abandonné comme trop lourd ici. | ✅ validé |
 
 > Ces 6 points sont discutés un par un avant tout code. Voir le détail de chaque choix
 > et son raisonnement plus bas.
