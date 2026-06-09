@@ -473,6 +473,21 @@ source 'n'  →  NASM: octet 0x6E  →  lodsb: AL=0x6E  →  0xB8000: 0x6E  → 
 ASCII est la **langue commune** de la source, de la mémoire et de l'écran (et du clavier en
 B6). C'est pourquoi écrire `0x6E` à `0xB8000` affiche 'n', sans traduction intermédiaire.
 
+> **Point clé — NASM ne connaît pas CP437.** Cette chaîne marche par *coïncidence* : NASM ne
+> *convertit* rien, il recopie l'octet du caractère tel qu'il est dans ton fichier source (=
+> ASCII pour les caractères de base, d'où `'n'` → `0x6E`). Et ça tombe juste **parce que les
+> 128 premiers codes de CP437 *sont* l'ASCII** (CP437 a été conçue comme une extension
+> d'ASCII). Au-delà de `0x7F`, les deux **divergent** :
+>
+> | 'é' selon… | octet(s) |
+> |---|---|
+> | source UTF-8 (ce que NASM recopie) | `0xC3 0xA9` (deux octets !) |
+> | CP437 (ce que le VGA affiche) | `0x82` |
+>
+> Un `'é'` tapé dans une chaîne serait donc émis en UTF-8 et interprété en CP437 → **charabia
+> à l'écran**. D'où la règle : **messages de boot en ASCII pur** ; pour un caractère spécial,
+> écris son code CP437 en dur (`db 0x82` pour 'é'), ne le tape pas dans une chaîne.
+
 #### Le partage des rôles, et les deux voies
 
 | Qui | Fait quoi |
