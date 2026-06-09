@@ -12,7 +12,15 @@
 - [Comment lire ce guide](#comment-lire-ce-guide)
 - [Les briques](#les-briques)
 - [Partie 0 — Setup, QEMU & premier boot](#partie-0--setup-qemu--premier-boot)
+  - [0.1 — Le décor : QEMU, un PC complet en logiciel](#01--le-décor--qemu-un-pc-complet-en-logiciel)
+  - [0.2 — La chaîne complète : du bouton power à ton code](#02--la-chaîne-complète--du-bouton-power-à-ton-code)
+  - [0.3 — Le boot sector, construit pas à pas](#03--le-boot-sector-construit-pas-à-pas)
+  - [0.4 — L'affichage en profondeur](#04--laffichage-en-profondeur)
+  - [0.5 — Lire le binaire avec `hexdump`](#05--lire-le-binaire-avec-hexdump)
+  - [0.6 — Vérifier dans QEMU](#06--vérifier-dans-qemu)
 - [Annexes](#annexes)
+  - [Annexe A — Rappels d'assembleur x86](#annexe-a--rappels-dassembleur-x86-real-mode-16-bits)
+  - [Annexe B — `boot.asm` ligne par ligne](#annexe-b--bootbootasm-ligne-par-ligne)
 
 ## Objectif
 
