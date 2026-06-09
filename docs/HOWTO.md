@@ -231,6 +231,16 @@ build/naos.img  (le "disque" que QEMU monte)
 - **`boot.asm` (texte) ne va jamais sur le disque** : c'est `boot.bin` (sa traduction) qui y
   va. Le `.asm` est la recette, le `.bin` est le plat.
 
+> **Pourquoi deux fichiers, `boot.bin` *et* `naos.img` ?** Ils encodent deux rôles distincts :
+> `boot.bin` = **un composant** (le secteur de boot assemblé, produit de `boot.asm`) ;
+> `naos.img` = **le disque bootable** que QEMU monte (et qu'on `dd`-erait sur une clé USB).
+> En B0 ils sont **identiques** — d'où le simple `cp` — parce que le disque ne contient *que*
+> le boot sector. Mais dès **B2**, l'image grossira :
+> `naos.img = [secteur de boot / GRUB] + [kernel] + …`, **assemblée à partir de plusieurs
+> pièces** (la règle deviendra un « link + assemble », plus un `cp`). Garder `naos.img`
+> distinct dès maintenant stabilise la cible `make run` (elle lance toujours *l'image*, quel
+> qu'en soit le contenu) et installe le modèle mental **composant vs disque**.
+
 #### (b) La chaîne d'exécution — de l'allumage à `0x7C00`
 
 ```
