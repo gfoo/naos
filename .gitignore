@@ -1,6 +1,12 @@
 # Artefacts de build
 build/
 
+# Cache de byte-code Python (outils dans tools/)
+__pycache__/
+
+# Log transitoire de construction du cross-compiler (toolchain/build-i686-elf.sh)
+build-toolchain.log
+
 # Réglages locaux Claude Code (conservés hors versionnement et hors distclean)
 .claude/settings.local.json
 

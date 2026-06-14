@@ -1,5 +1,24 @@
 # tools/ — outils de développement naos
 
+## `qemu-shot.py` — capture l'écran de QEMU (B0 → B12)
+
+Juste une **photo de l'écran**, rien d'autre : tu lances QEMU headless avec un socket QMP (le
+protocole de contrôle de QEMU), le script s'y attache et écrit `build/shot.png`. Tu ouvres
+l'image et tu juges toi-même — pas de PASS/FAIL, pas d'OCR.
+
+```sh
+make run QMP=1                  # terminal 1 : QEMU sans fenêtre + socket QMP
+python3 tools/qemu-shot.py      # terminal 2 : écrit build/shot.png
+```
+
+Options : `--sock` (socket QMP, défaut `/tmp/naos-qmp.sock`), `--shot` (PNG, défaut
+`build/shot.png`), `--timeout` (défaut 10 s).
+
+Le seul truc malin : **pas de `sleep` fixe**. Capturer trop tôt donne « display not
+initialized » ; le script attend que l'écran se *stabilise* (deux captures de taille proche).
+Comme le curseur `_` du mode texte clignote pour toujours, il compare la **taille** des PNG
+(clignotement ≈ 0,5 %, toléré), pas les octets exacts. Voir `docs/HOWTO.md` § 0.6.
+
 ## `vgafont.py` — police VGA 8×16 (préparation B3)
 
 > En **B3** (driver écran), naos remplacera la police CP437 de la ROM par la sienne, en
