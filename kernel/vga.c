@@ -1,14 +1,14 @@
-/* naos — B3 : driver écran VGA mode texte. Voir include/vga.h et docs/howto/03-vga.md. */
+/* naos — B3: VGA text-mode screen driver. See include/vga.h and docs/howto/03-vga.md. */
 #include "vga.h"
 
 #define VGA_MEM  ((volatile uint16_t *)0xB8000)
 #define COLS     80
 #define ROWS     25
 
-static size_t  row, col;     /* curseur logique */
-static uint8_t color;        /* attribut courant (fond<<4 | avant-plan) */
+static size_t  row, col;     /* logical cursor */
+static uint8_t color;        /* current attribute (background<<4 | foreground) */
 
-/* Une cellule VGA = caractère (octet bas) + attribut (octet haut). */
+/* A VGA cell = character (low byte) + attribute (high byte). */
 static inline uint16_t cell(char c, uint8_t attr)
 {
     return (uint16_t)(unsigned char)c | ((uint16_t)attr << 8);
@@ -28,7 +28,7 @@ void vga_init(void)
     row = col = 0;
 }
 
-/* Remonte tout d'une ligne et vide la dernière ; le curseur reste en bas. */
+/* Shift everything up by one line and clear the last one; the cursor stays at the bottom. */
 static void scroll(void)
 {
     for (size_t y = 1; y < ROWS; y++)

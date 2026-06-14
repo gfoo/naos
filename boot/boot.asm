@@ -1,24 +1,24 @@
-; naos — B2/B3 : en-tête Multiboot + stub ASM -> kmain (C)
+; naos — B2/B3 : Multiboot header + ASM stub -> kmain (C)
 ; -----------------------------------------------------------------------------
-; À partir de B2, on ne fait plus le boot sector à la main (cf. B1, conservé dans
-; boot/boot.asm.b1). On délègue le démarrage à GRUB via la spec Multiboot 1 :
-; GRUB nous charge en mode protégé 32 bits (A20 + GDT + PE déjà faits), à 1 Mo.
+; Starting from B2, we no longer build the boot sector by hand (cf. B1, kept in
+; boot/boot.asm.b1). We delegate startup to GRUB via the Multiboot 1 spec:
+; GRUB loads us in 32-bit protected mode (A20 + GDT + PE already done), at 1 MB.
 ;
-; Ce fichier fournit trois choses :
-;   1. l'EN-TÊTE MULTIBOOT, que GRUB cherche dans les 8 premiers Ko du binaire ;
-;   2. une PILE (la spec Multiboot ne garantit pas d'esp utilisable) ;
-;   3. le point d'entrée _start, qui appelle kmain() (notre code C).
+; This file provides three things:
+;   1. the MULTIBOOT HEADER, which GRUB looks for in the first 8 KB of the binary;
+;   2. a STACK (the Multiboot spec does not guarantee a usable esp);
+;   3. the entry point _start, which calls kmain() (our C code).
 ;
-; Assemblé en ELF32 (-f elf32), lié par linker.ld. Voir docs/howto/02-multiboot.md.
+; Assembled as ELF32 (-f elf32), linked by linker.ld. See docs/howto/02-multiboot.md.
 
 bits 32
 
-; --- en-tête Multiboot 1 ---
-MB_ALIGN    equ 1 << 0                 ; modules alignés sur des pages
-MB_MEMINFO  equ 1 << 1                 ; fournir la carte mémoire (memmap)
+; --- Multiboot 1 header ---
+MB_ALIGN    equ 1 << 0                 ; modules aligned on pages
+MB_MEMINFO  equ 1 << 1                 ; provide the memory map (memmap)
 MB_FLAGS    equ MB_ALIGN | MB_MEMINFO
-MB_MAGIC    equ 0x1BADB002             ; nombre magique reconnu par GRUB
-MB_CHECKSUM equ -(MB_MAGIC + MB_FLAGS) ; magic + flags + checksum doit faire 0
+MB_MAGIC    equ 0x1BADB002             ; magic number recognized by GRUB
+MB_CHECKSUM equ -(MB_MAGIC + MB_FLAGS) ; magic + flags + checksum must sum to 0
 
 section .multiboot
 align 4
@@ -26,21 +26,21 @@ align 4
     dd MB_FLAGS
     dd MB_CHECKSUM
 
-; --- pile : 16 Kio dans la BSS (non initialisée) ---
+; --- stack: 16 KiB in the BSS (uninitialized) ---
 section .bss
 align 16
 stack_bottom:
     resb 16384
 stack_top:
 
-; --- point d'entrée ---
+; --- entry point ---
 section .text
 global _start
 extern kmain
 _start:
-    mov esp, stack_top                 ; installer la pile (croît vers le bas)
-    call kmain                         ; -> C ; ne devrait pas revenir
+    mov esp, stack_top                 ; install the stack (grows downward)
+    call kmain                         ; -> C ; should not return
 .hang:
     cli
-    hlt                                ; si kmain revient : arrêt définitif
+    hlt                                ; if kmain returns: halt for good
     jmp .hang

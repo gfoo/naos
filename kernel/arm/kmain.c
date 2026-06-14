@@ -1,13 +1,13 @@
-/* naos — B0 (ARM / AArch64) : premier « boot ».
+/* naos — B0 (ARM / AArch64): first "boot".
  * -----------------------------------------------------------------------------
- * Contraste avec le x86 : la machine QEMU 'virt' n'a PAS de mémoire vidéo VGA
- * (0xB8000). Pour afficher du texte, on écrit dans l'UART PL011 — un port série
- * mappé en mémoire à 0x09000000. La sortie part sur la console série (stdout de
- * QEMU), pas sur un écran : la vérif se lit, elle ne se capture pas.
- * Voir docs/howto/00-setup.md §0.7. */
+ * Contrast with x86: the QEMU 'virt' machine has NO VGA video memory
+ * (0xB8000). To display text, we write to the PL011 UART — a serial port
+ * memory-mapped at 0x09000000. The output goes to the serial console (QEMU's
+ * stdout), not to a screen: the check is read, it is not captured.
+ * See docs/howto/00-setup.md §0.7. */
 
-/* Registre de données (DR, offset 0) de l'UART PL011 : y écrire émet un caractère.
- * Sous QEMU, l'UART est déjà prêt à l'emploi — aucune init nécessaire en B0. */
+/* Data register (DR, offset 0) of the PL011 UART: writing to it emits a character.
+ * Under QEMU, the UART is already ready to use — no init needed in B0. */
 static volatile unsigned int *const UART0_DR = (unsigned int *)0x09000000;
 
 static void uart_putc(char c)

@@ -1,13 +1,13 @@
-/* naos — B3 : driver écran VGA mode texte (buffer 0xB8000, 80x25).
- * Chaque cellule = 2 octets : caractère (CP437) + attribut couleur (4 bits fond,
- * 4 bits avant-plan). Voir docs/howto/03-vga.md. */
+/* naos — B3: VGA text-mode screen driver (0xB8000 buffer, 80x25).
+ * Each cell = 2 bytes: character (CP437) + color attribute (4 bits background,
+ * 4 bits foreground). See docs/howto/03-vga.md. */
 #ifndef NAOS_VGA_H
 #define NAOS_VGA_H
 
 #include <stdint.h>
 #include <stddef.h>
 
-/* Les 16 couleurs VGA (palette texte standard). */
+/* The 16 VGA colors (standard text palette). */
 enum vga_color {
     VGA_BLACK = 0, VGA_BLUE, VGA_GREEN, VGA_CYAN,
     VGA_RED, VGA_MAGENTA, VGA_BROWN, VGA_LIGHT_GREY,
@@ -15,9 +15,9 @@ enum vga_color {
     VGA_LIGHT_RED, VGA_LIGHT_MAGENTA, VGA_LIGHT_BROWN, VGA_WHITE,
 };
 
-void vga_init(void);                                   /* efface l'écran, curseur (0,0) */
+void vga_init(void);                                   /* clears the screen, cursor (0,0) */
 void vga_set_color(enum vga_color fg, enum vga_color bg);
-void vga_putchar(char c);                              /* gère \n \r \t \b + scroll */
-void vga_write(const char *s);                         /* écrit une chaîne C */
+void vga_putchar(char c);                              /* handles \n \r \t \b + scroll */
+void vga_write(const char *s);                         /* writes a C string */
 
 #endif /* NAOS_VGA_H */

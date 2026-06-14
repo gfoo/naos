@@ -1,10 +1,10 @@
-/* naos — point d'entrée C du kernel.
- *  B2 : prouver que kmain() s'exécute (chargé par GRUB via Multiboot).
- *  B3 : utiliser le driver VGA (texte formaté + couleurs + défilement).
- * Appelé par boot/boot.asm (_start). Voir docs/howto/02-multiboot.md et 03-vga.md. */
+/* naos — C entry point of the kernel.
+ *  B2: prove that kmain() executes (loaded by GRUB via Multiboot).
+ *  B3: use the VGA driver (formatted text + colors + scrolling).
+ * Called by boot/boot.asm (_start). See docs/howto/02-multiboot.md and 03-vga.md. */
 #include "vga.h"
 
-/* mini-itoa pour entiers >= 0 (suffisant pour la démo de scroll). */
+/* mini-itoa for integers >= 0 (sufficient for the scroll demo). */
 static void put_uint(unsigned int n)
 {
     char buf[11];
@@ -23,7 +23,7 @@ void kmain(void)
     vga_set_color(VGA_LIGHT_GREY, VGA_BLACK);
     vga_write("Booted by GRUB via Multiboot; kmain() runs in 32-bit C.\n\n");
 
-    /* Preuve du défilement : imprimer plus de 25 lignes force le scroll. */
+    /* Scrolling proof: printing more than 25 lines forces a scroll. */
     vga_set_color(VGA_LIGHT_CYAN, VGA_BLACK);
     for (unsigned int i = 1; i <= 30; i++) {
         vga_write("  line ");

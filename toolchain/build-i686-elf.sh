@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# naos — construction du cross-compiler i686-elf (binutils + gcc)
+# naos — building the i686-elf cross-compiler (binutils + gcc)
 # -----------------------------------------------------------------------------
-# Pourquoi un cross-compiler ? Le gcc système produit des binaires Linux (libc,
-# format hôte). Notre kernel tourne SANS OS : un toolchain i686-elf ne fait
-# aucune hypothèse hôte, ce qui évite des bugs sournois (cf. docs/DESIGN-LOG.md, C5).
-# Référence : https://wiki.osdev.org/GCC_Cross-Compiler
+# Why a cross-compiler? The system gcc produces Linux binaries (libc,
+# host format). Our kernel runs with NO OS: an i686-elf toolchain makes
+# no host assumptions, which avoids sneaky bugs (see docs/DESIGN-LOG.md, C5).
+# Reference: https://wiki.osdev.org/GCC_Cross-Compiler
 #
-# B0 n'utilise PAS ce compilateur (le boot sector est en NASM pur). Il sert à
-# partir de B2 (premier code C). À lancer une fois ; compte ~20-40 min.
+# B0 does NOT use this compiler (the boot sector is pure NASM). It is used
+# starting from B2 (first C code). Run it once; expect ~20-40 min.
 #
-# Prérequis (à installer avant, Debian/Ubuntu) :
+# Prerequisites (install beforehand, Debian/Ubuntu):
 #   sudo apt install -y build-essential bison flex libgmp-dev libmpc-dev \
 #                       libmpfr-dev texinfo wget
 set -euo pipefail
@@ -18,17 +18,17 @@ BINUTILS_VERSION="${BINUTILS_VERSION:-2.43}"
 GCC_VERSION="${GCC_VERSION:-14.2.0}"
 
 export TARGET="${TARGET:-i686-elf}"
-export PREFIX="${PREFIX:-$HOME/opt/cross}"   # où installer le toolchain
+export PREFIX="${PREFIX:-$HOME/opt/cross}"   # where to install the toolchain
 export PATH="$PREFIX/bin:$PATH"
-SRC="${SRC:-$HOME/src/naos-toolchain}"        # où télécharger/compiler les sources
+SRC="${SRC:-$HOME/src/naos-toolchain}"        # where to download/compile the sources
 JOBS="$(nproc)"
 
 mkdir -p "$SRC" "$PREFIX"
 cd "$SRC"
 
-echo ">> Cible=$TARGET  Préfixe=$PREFIX  Jobs=$JOBS"
+echo ">> Target=$TARGET  Prefix=$PREFIX  Jobs=$JOBS"
 
-# --- binutils (assembleur, linker, objcopy... pour la cible i686-elf) ---
+# --- binutils (assembler, linker, objcopy... for the i686-elf target) ---
 if [ ! -d "binutils-$BINUTILS_VERSION" ]; then
   wget -nc "https://ftp.gnu.org/gnu/binutils/binutils-$BINUTILS_VERSION.tar.gz"
   tar xf "binutils-$BINUTILS_VERSION.tar.gz"
@@ -40,7 +40,7 @@ make -j"$JOBS"
 make install
 cd "$SRC"
 
-# --- gcc (sans headers, langage C seulement : on n'a pas de libc) ---
+# --- gcc (without headers, C language only: we have no libc) ---
 if [ ! -d "gcc-$GCC_VERSION" ]; then
   wget -nc "https://ftp.gnu.org/gnu/gcc/gcc-$GCC_VERSION/gcc-$GCC_VERSION.tar.gz"
   tar xf "gcc-$GCC_VERSION.tar.gz"
@@ -55,6 +55,6 @@ make install-target-libgcc
 cd "$SRC"
 
 echo
-echo ">> Terminé. Ajoute ceci à ton ~/.bashrc (ou ~/.zshrc) :"
+echo ">> Done. Add this to your ~/.bashrc (or ~/.zshrc):"
 echo "     export PATH=\"$PREFIX/bin:\$PATH\""
-echo ">> Vérifie :  $TARGET-gcc --version"
+echo ">> Check:  $TARGET-gcc --version"

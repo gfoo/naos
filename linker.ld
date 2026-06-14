@@ -1,8 +1,8 @@
-/* naos — layout mémoire du kernel (B2+).
- * Le kernel est chargé à 1 Mo (0x100000) : au-dessus de la zone basse réservée
- * (IVT, BIOS, mémoire vidéo VGA à 0xB8000). C'est l'adresse conventionnelle des
- * kernels Multiboot. L'en-tête Multiboot doit figurer dans les 8 premiers Ko du
- * fichier -> on place .multiboot tout en tête de .text. */
+/* naos — kernel memory layout (B2+).
+ * The kernel is loaded at 1 MB (0x100000): above the reserved low region
+ * (IVT, BIOS, VGA video memory at 0xB8000). This is the conventional address of
+ * Multiboot kernels. The Multiboot header must appear within the first 8 KB of the
+ * file -> we place .multiboot right at the start of .text. */
 ENTRY(_start)
 
 SECTIONS
@@ -11,7 +11,7 @@ SECTIONS
 
     .text BLOCK(4K) : ALIGN(4K)
     {
-        *(.multiboot)      /* en-tête Multiboot en premier */
+        *(.multiboot)      /* Multiboot header first */
         *(.text)
     }
 

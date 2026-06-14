@@ -1,7 +1,7 @@
-/* naos — B2 : point d'entrée C du kernel.
- * But : prouver que kmain() s'exécute, chargé par GRUB via Multiboot. On écrit
- * directement dans la mémoire vidéo VGA (0xB8000) — le driver écran arrive en B3.
- * Appelé par boot/boot.asm (_start). Voir docs/howto/02-multiboot.md. */
+/* naos — B2: C entry point of the kernel.
+ * Goal: prove that kmain() executes, loaded by GRUB via Multiboot. We write
+ * directly into VGA video memory (0xB8000) — the screen driver arrives in B3.
+ * Called by boot/boot.asm (_start). See docs/howto/02-multiboot.md. */
 
 void kmain(void)
 {
@@ -9,7 +9,7 @@ void kmain(void)
     volatile unsigned short *vga = (unsigned short *)0xB8000;
 
     for (int i = 0; msg[i]; i++)
-        vga[i] = (unsigned short)(unsigned char)msg[i] | (0x0A << 8); /* vert clair */
+        vga[i] = (unsigned short)(unsigned char)msg[i] | (0x0A << 8); /* light green */
 
     for (;;)
         __asm__ volatile ("hlt");
