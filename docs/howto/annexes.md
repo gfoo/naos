@@ -1,276 +1,276 @@
-[← Sommaire du HOWTO](../HOWTO.md)
+[← HOWTO contents](../HOWTO.md)
 
-## Annexes
+## Appendices
 
-### Annexe A — Rappels d'assembleur x86 (real mode, 16 bits)
+### Appendix A — x86 assembly refresher (real mode, 16-bit)
 
-À lire avant/pendant B1.
+Read before/during B1.
 
-**A.1 Ce qu'est l'assembleur.** L'assembleur est la représentation **lisible** du langage
-machine : chaque **mnémonique** (`mov`, `jmp`, `int`…) correspond à une (ou quelques)
-instruction(s) machine que le CPU exécute directement. Contrairement au C, il n'y a **pas de
-traduction sémantique** : ce que tu écris est, à un encodage près, ce que le CPU fait. On
-l'utilise là où le C ne *peut pas* aller (real mode, `lgdt`, `iret`, bascule de mode).
-Principe directeur : **tu gères tout à la main** — pas de variables typées, pas de pile
-d'appel automatique, pas de vérification. Le CPU fait *exactement* ce que tu dis, erreurs
-comprises.
+**A.1 What assembly is.** Assembly is the **human-readable** representation of machine
+code: each **mnemonic** (`mov`, `jmp`, `int`…) maps to one (or a few) machine
+instruction(s) the CPU executes directly. Unlike C, there is **no semantic
+translation**: what you write is, up to an encoding, what the CPU does. You use it
+where C *cannot* go (real mode, `lgdt`, `iret`, mode switching).
+Guiding principle: **you manage everything by hand** — no typed variables, no automatic
+call stack, no checking. The CPU does *exactly* what you say, errors
+included.
 
-**A.2 Les registres (16 bits).** Un registre = une case mémoire ultra-rapide *dans* le CPU.
+**A.2 The registers (16-bit).** A register = an ultra-fast memory cell *inside* the CPU.
 
-| Registre | Nom | Usage conventionnel |
+| Register | Name | Conventional usage |
 |---|---|---|
-| `AX` | Accumulator | calculs, valeur de retour ; `AH`/`AL` = octet haut/bas |
-| `BX` | Base | base d'adressage ; `BH`/`BL` |
-| `CX` | Counter | compteur de boucle (`loop`, `rep`) ; `CH`/`CL` |
-| `DX` | Data | données, port d'E/S ; `DH`/`DL` |
-| `SI` | Source Index | pointeur source (`lodsb`, `movsb`) |
-| `DI` | Destination Index | pointeur destination |
-| `SP` | Stack Pointer | sommet de la pile |
-| `BP` | Base Pointer | base d'une trame de pile |
-| `IP` | Instruction Pointer | adresse de la prochaine instruction (non modifiable directement) |
-| `CS DS ES SS` | Segments | Code / Data / Extra / Stack (voir A.3) |
-| `FLAGS` | Drapeaux | résultats de comparaisons (ZF, CF, SF…) |
+| `AX` | Accumulator | computations, return value ; `AH`/`AL` = high/low byte |
+| `BX` | Base | addressing base ; `BH`/`BL` |
+| `CX` | Counter | loop counter (`loop`, `rep`) ; `CH`/`CL` |
+| `DX` | Data | data, I/O port ; `DH`/`DL` |
+| `SI` | Source Index | source pointer (`lodsb`, `movsb`) |
+| `DI` | Destination Index | destination pointer |
+| `SP` | Stack Pointer | top of the stack |
+| `BP` | Base Pointer | base of a stack frame |
+| `IP` | Instruction Pointer | address of the next instruction (not directly modifiable) |
+| `CS DS ES SS` | Segments | Code / Data / Extra / Stack (see A.3) |
+| `FLAGS` | Flags | results of comparisons (ZF, CF, SF…) |
 
-`AX` est sur 16 bits ; ses moitiés `AH` (bits 8-15) et `AL` (bits 0-7) sont adressables
-séparément. Écrire dans `AL` ne touche pas `AH`. En mode protégé (B1+), ces registres
-s'étendent à 32 bits : `EAX`, et `AX` en est la moitié basse.
+`AX` is 16-bit ; its halves `AH` (bits 8-15) and `AL` (bits 0-7) are addressable
+separately. Writing to `AL` does not touch `AH`. In protected mode (B1+), these registers
+extend to 32 bits: `EAX`, of which `AX` is the low half.
 
-**A.3 Real mode et l'adressage `segment:offset`.** En real mode, une adresse physique se
-calcule sur 20 bits :
+**A.3 Real mode and `segment:offset` addressing.** In real mode, a physical address is
+computed over 20 bits:
 
 ```
-adresse physique = (segment × 16) + offset
+physical address = (segment × 16) + offset
 ```
 
-Exemple : `DS = 0x07C0`, `offset = 0` → `0x7C00` ; même adresse que `DS = 0`, `offset = 0x7C00`.
-Il y a donc plusieurs façons d'écrire la même adresse. Dans naos on choisit la plus simple :
-**tous les segments à 0**, et on raisonne en offsets absolus depuis 0 (c'est pourquoi
-`boot.asm` met `DS = ES = SS = 0`). Pourquoi `0x7C00` ? Convention IBM de 1981 : le BIOS y
-charge toujours le boot sector.
+Example: `DS = 0x07C0`, `offset = 0` → `0x7C00` ; same address as `DS = 0`, `offset = 0x7C00`.
+So there are several ways to write the same address. In naos we pick the simplest one:
+**all segments at 0**, and we reason in absolute offsets from 0 (which is why
+`boot.asm` sets `DS = ES = SS = 0`). Why `0x7C00`? IBM convention from 1981: the BIOS always
+loads the boot sector there.
 
-**A.4 Syntaxe Intel (NASM) : `instruction destination, source`** (destination à gauche, comme
-`dest = src` en C).
+**A.4 Intel syntax (NASM): `instruction destination, source`** (destination on the left, like
+`dest = src` in C).
 
 ```nasm
-mov ax, 5      ; ax <- 5         (immédiat)
-mov ds, ax     ; ds <- ax        (registre)
-mov al, [si]   ; al <- octet à l'adresse SI   (crochets = déréférencement)
-mov [di], al   ; octet à l'adresse DI <- al
+mov ax, 5      ; ax <- 5         (immediate)
+mov ds, ax     ; ds <- ax        (register)
+mov al, [si]   ; al <- byte at address SI   (brackets = dereference)
+mov [di], al   ; byte at address DI <- al
 ```
 
-Règles clés : **crochets `[ ]`** = « contenu de la mémoire à cette adresse » (comme `*ptr`) ;
-sans crochets = la valeur elle-même (adresse, nombre, registre) ; la **taille** est déduite
-des registres (`al` = 1 o, `ax` = 2 o), sinon on la précise (`byte`, `word`).
+Key rules: **brackets `[ ]`** = "contents of memory at this address" (like `*ptr`) ;
+without brackets = the value itself (address, number, register) ; the **size** is inferred
+from the registers (`al` = 1 byte, `ax` = 2 bytes), otherwise you specify it (`byte`, `word`).
 
-**A.5 Les instructions qu'on croise dans naos.**
+**A.5 The instructions we run into in naos.**
 
-| Instruction | Effet |
+| Instruction | Effect |
 |---|---|
-| `mov d, s` | copie `s` dans `d` |
-| `xor a, a` | met `a` à 0 (xor d'une valeur avec elle-même) — plus court que `mov a,0` |
-| `test a, a` | calcule `a AND a` sans stocker, juste pour positionner les drapeaux (ZF=1 si `a`==0) |
-| `cmp a, b` | calcule `a - b` sans stocker, positionne les drapeaux |
-| `jmp lbl` | saut inconditionnel |
-| `jz / jnz lbl` | saut si ZF=1 / ZF=0 (zéro / non zéro) |
-| `lodsb` | `AL <- [DS:SI]`, puis `SI++` (charge un octet et avance) |
-| `int n` | déclenche l'interruption logicielle n (appel d'un service BIOS) |
-| `hlt` | arrête le CPU jusqu'à la prochaine interruption |
-| `cli / sti` | désactive / réactive les interruptions matérielles |
-| `push / pop` | empile / dépile une valeur (via `SP`) |
+| `mov d, s` | copies `s` into `d` |
+| `xor a, a` | sets `a` to 0 (xor of a value with itself) — shorter than `mov a,0` |
+| `test a, a` | computes `a AND a` without storing, just to set the flags (ZF=1 if `a`==0) |
+| `cmp a, b` | computes `a - b` without storing, sets the flags |
+| `jmp lbl` | unconditional jump |
+| `jz / jnz lbl` | jump if ZF=1 / ZF=0 (zero / non-zero) |
+| `lodsb` | `AL <- [DS:SI]`, then `SI++` (loads a byte and advances) |
+| `int n` | triggers software interrupt n (call to a BIOS service) |
+| `hlt` | halts the CPU until the next interrupt |
+| `cli / sti` | disables / re-enables hardware interrupts |
+| `push / pop` | pushes / pops a value (via `SP`) |
 
-**A.6 La pile.** `SP` pointe sur le sommet. Particularité x86 : elle **croît vers le bas**
-(`push` *décrémente* `SP`). D'où `mov sp, 0x7C00` : la pile grandit *sous* le code, sans
-l'écraser.
+**A.6 The stack.** `SP` points at the top. x86 quirk: it **grows downward**
+(`push` *decrements* `SP`). Hence `mov sp, 0x7C00`: the stack grows *below* the code, without
+overwriting it.
 
-**A.7 Directives NASM (≠ instructions).** Une directive s'adresse à l'assembleur, pas au CPU :
+**A.7 NASM directives (≠ instructions).** A directive addresses the assembler, not the CPU:
 
-| Directive | Rôle |
+| Directive | Role |
 |---|---|
-| `bits 16` | « assemble en code 16 bits » |
-| `org 0x7C00` | « ce code vivra à 0x7C00 » → base des calculs d'adresse |
-| `db`, `dw`, `dd` | pose des octets / mots (2 o) / double-mots (4 o) bruts |
-| `times N x` | répète `x` N fois (padding) |
-| `label:` | nom symbolique d'une adresse (global) ; `.label` = local au dernier global |
-| `$` / `$$` | adresse courante / début de section (`$-$$` = octets écrits) |
+| `bits 16` | "assemble as 16-bit code" |
+| `org 0x7C00` | "this code will live at 0x7C00" → base for address computations |
+| `db`, `dw`, `dd` | lays down raw bytes / words (2 bytes) / double-words (4 bytes) |
+| `times N x` | repeats `x` N times (padding) |
+| `label:` | symbolic name of an address (global) ; `.label` = local to the last global |
+| `$` / `$$` | current address / start of section (`$-$$` = bytes written) |
 
-> **Labels globaux vs locaux.** Un label sans point (`start`) est global ; un label avec point
-> (`.print`) est **local**, rattaché au dernier global au-dessus (donc `start.print`). Ça
-> évite les collisions : tu peux réutiliser `.loop`/`.done` dans plusieurs routines. Règle
-> mentale : **global = repères (routines, entrée) ; local (`.`) = cibles de saut internes.**
+> **Global vs local labels.** A label without a dot (`start`) is global ; a label with a dot
+> (`.print`) is **local**, attached to the last global above it (so `start.print`). This
+> avoids collisions: you can reuse `.loop`/`.done` across several routines. Mental rule:
+> **global = landmarks (routines, entry point) ; local (`.`) = internal jump targets.**
 
-### Annexe B — `boot/boot.asm` ligne par ligne
+### Appendix B — `boot/boot.asm` line by line
 
 ```nasm
 bits 16
 ```
-**Directive.** On cible le real mode 16 bits, car le CPU démarre dans ce mode. Sans ça, NASM
-encoderait des instructions 32 bits, mal interprétées au boot.
+**Directive.** We target 16-bit real mode, because the CPU boots in this mode. Without it, NASM
+would encode 32-bit instructions, misinterpreted at boot.
 
 ```nasm
 org  0x7C00
 ```
-**Directive.** On annonce que le code s'exécutera à `0x7C00`. NASM calcule alors toutes les
-adresses de labels (comme `msg`) à partir de cette base. Oubli classique : sans `org`,
-`mov si, msg` pointerait à côté et on afficherait du charabia.
+**Directive.** We declare that the code will run at `0x7C00`. NASM then computes all
+label addresses (like `msg`) from this base. Classic oversight: without `org`,
+`mov si, msg` would point off-target and we'd print garbage.
 
 ```nasm
 start:
 ```
-**Label.** Point d'entrée symbolique, pour la lisibilité. Le CPU, lui, commence simplement à
-`0x7C00` (premier octet du fichier).
+**Label.** Symbolic entry point, for readability. The CPU itself simply starts at
+`0x7C00` (first byte of the file).
 
 ```nasm
     cli
 ```
-On **désactive les interruptions matérielles** : pendant qu'on reconfigure segments et pile,
-on ne veut pas qu'une interruption survienne sur une pile incohérente.
+We **disable hardware interrupts**: while reconfiguring segments and the stack,
+we don't want an interrupt to fire on an inconsistent stack.
 
 ```nasm
     xor ax, ax
 ```
-`AX <- 0`. Idiome universel : `xor reg, reg` met à zéro en 2 octets (plus court que
-`mov ax, 0`). On prépare la valeur 0 pour les segments.
+`AX <- 0`. Universal idiom: `xor reg, reg` zeroes out in 2 bytes (shorter than
+`mov ax, 0`). We prepare the value 0 for the segments.
 
 ```nasm
     mov ds, ax
     mov es, ax
     mov ss, ax
 ```
-On met `DS`, `ES`, `SS` à 0. **Pourquoi via `AX` ?** Les registres de segment n'acceptent pas
-d'immédiat (`mov ds, 0` est illégal) ; il faut passer par un registre général.
+We set `DS`, `ES`, `SS` to 0. **Why via `AX`?** Segment registers don't accept
+an immediate (`mov ds, 0` is illegal) ; you have to go through a general-purpose register.
 
 ```nasm
     mov sp, 0x7C00
 ```
-Sommet de pile à `0x7C00`. Comme la pile croît vers le bas, elle occupe la zone *sous* le code
+Stack top at `0x7C00`. Since the stack grows downward, it occupies the area *below* the code
 (`SS:SP` = `0x0000:0x7C00`).
 
 ```nasm
     sti
 ```
-On **réactive les interruptions** : la config est finie, et `int 0x10` en a besoin.
+We **re-enable interrupts**: the config is done, and `int 0x10` needs them.
 
 ```nasm
     mov si, msg
 ```
-`SI` pointe sur le 1er octet de la chaîne (source de `lodsb`). Grâce à `org`, `msg` est
-l'adresse réelle en mémoire.
+`SI` points at the 1st byte of the string (source for `lodsb`). Thanks to `org`, `msg` is
+the real address in memory.
 
 ```nasm
 .print:
 ```
-Label **local** (le `.` le rattache à `start`). Début de la boucle d'affichage.
+**Local** label (the `.` attaches it to `start`). Start of the print loop.
 
 ```nasm
     lodsb
 ```
-`AL <- [DS:SI]` puis `SI++`. Une instruction qui charge l'octet courant *et* avance le pointeur
-— pensée pour parcourir une chaîne.
+`AL <- [DS:SI]` then `SI++`. One instruction that loads the current byte *and* advances the
+pointer — designed for walking a string.
 
 ```nasm
     test al, al
     jz .hang
 ```
-`test al, al` positionne ZF selon `AL`. Si `AL == 0` (fin de chaîne), `jz` saute vers `.hang`.
-Principe : on teste (`test`/`cmp`) *puis* on saute (`jz`/`jnz`), en deux temps.
+`test al, al` sets ZF according to `AL`. If `AL == 0` (end of string), `jz` jumps to `.hang`.
+Principle: you test (`test`/`cmp`) *then* jump (`jz`/`jnz`), in two steps.
 
 ```nasm
     mov ah, 0x0E
     mov bh, 0x00
     int 0x10
 ```
-Service vidéo BIOS. `int 0x10` lit `AH` pour la fonction : `0x0E` = téléscripteur (affiche `AL`,
-avance le curseur). `BH` = page vidéo 0. On *consomme* un service du firmware (il disparaîtra
-en mode protégé).
+BIOS video service. `int 0x10` reads `AH` for the function: `0x0E` = teletype (prints `AL`,
+advances the cursor). `BH` = video page 0. We *consume* a firmware service (it will disappear
+in protected mode).
 
 ```nasm
     jmp .print
 ```
-Retour en haut de boucle pour le caractère suivant.
+Back to the top of the loop for the next character.
 
 ```nasm
 .hang:
     hlt
     jmp .hang
 ```
-`hlt` met le CPU en pause jusqu'à une interruption ; si réveillé, `jmp .hang` le rendort.
-**Pourquoi ?** Sans ça, le CPU exécuterait les octets suivants (le padding `0x00`, interprété
-`add [bx+si], al`) et finirait par planter.
+`hlt` pauses the CPU until an interrupt ; if woken up, `jmp .hang` puts it back to sleep.
+**Why?** Without it, the CPU would execute the following bytes (the `0x00` padding, interpreted
+as `add [bx+si], al`) and eventually crash.
 
 ```nasm
 msg db "naos B0: it boots!", 13, 10, 0
 ```
-**Données.** `db` pose les octets de la chaîne. `13, 10` = CR LF ; `0` = terminateur lu par
+**Data.** `db` lays down the bytes of the string. `13, 10` = CR LF ; `0` = terminator read by
 `test al, al`.
 
 ```nasm
 times 510-($-$$) db 0
 ```
-**Padding.** `$-$$` = octets écrits jusqu'ici. `510 - (ça)` = nombre de zéros pour atteindre
-l'octet 510 → la signature tombe pile aux offsets 510-511.
+**Padding.** `$-$$` = bytes written so far. `510 - (that)` = number of zeros to reach
+byte 510 → the signature lands exactly at offsets 510-511.
 
 ```nasm
 dw 0xAA55
 ```
-**Signature de boot.** `dw` pose 2 octets. En little-endian, `0xAA55` s'écrit `55 AA` →
-octet 510 = `0x55`, octet 511 = `0xAA`. Sans elle, le BIOS déclare le disque non-bootable.
+**Boot signature.** `dw` lays down 2 bytes. In little-endian, `0xAA55` is written `55 AA` →
+byte 510 = `0x55`, byte 511 = `0xAA`. Without it, the BIOS declares the disk non-bootable.
 
-**Principes à retenir.**
-1. **Tout est explicite** : segments, pile, fin de chaîne — rien n'est automatique.
-2. **Tester puis sauter** : `test`/`cmp` posent les drapeaux, `jz`/`jnz` décident.
-3. **Directive ≠ instruction** : `org`/`times`/`db` parlent à NASM ; `mov`/`int`/`hlt` au CPU.
-4. **`org` est vital** : il aligne les adresses calculées sur l'adresse réelle de chargement.
-5. **Gare le CPU** (`hlt; jmp $`) au lieu de le laisser tomber dans le vide.
+**Principles to remember.**
+1. **Everything is explicit**: segments, stack, end of string — nothing is automatic.
+2. **Test then jump**: `test`/`cmp` set the flags, `jz`/`jnz` decide.
+3. **Directive ≠ instruction**: `org`/`times`/`db` talk to NASM ; `mov`/`int`/`hlt` to the CPU.
+4. **`org` is vital**: it aligns computed addresses with the real load address.
+5. **Park the CPU** (`hlt; jmp $`) instead of letting it fall into the void.
 
-### Annexe C — `int 0x10` en détail (services BIOS & interruptions)
+### Appendix C — `int 0x10` in detail (BIOS services & interrupts)
 
-Comprendre `int 0x10`, c'est comprendre **tous** les services BIOS (`int 0x13` disque,
-`int 0x16` clavier, `int 0x15` mémoire…) : même mécanisme.
+Understanding `int 0x10` means understanding **all** the BIOS services (`int 0x13` disk,
+`int 0x16` keyboard, `int 0x15` memory…): same mechanism.
 
-**C.1 Une seule porte, plein de fonctions.** `int 0x10` n'affiche pas « par nature » : c'est
-le **point d'entrée unique des services vidéo** du BIOS, qui sait faire des dizaines de
-choses. Comment sait-il *laquelle* tu veux ? Il **regarde `AH`** :
+**C.1 One door, many functions.** `int 0x10` doesn't print "by nature": it's
+the **single entry point for the BIOS video services**, which can do dozens of
+things. How does it know *which one* you want? It **looks at `AH`**:
 
-| `AH` | Fonction | Arguments |
+| `AH` | Function | Arguments |
 |---|---|---|
-| `0x00` | changer de mode vidéo | `AL` = mode |
-| `0x02` | positionner le curseur | `BH` = page, `DH` = ligne, `DL` = colonne |
-| `0x06` | faire défiler vers le haut | `AL`, `CX`, `DX`, `BH`… |
-| **`0x0E`** | **téléscripteur (afficher 1 caractère)** | **`AL` = caractère, `BH` = page, `BL` = couleur** |
-| `0x13` | afficher une chaîne | `ES:BP` = chaîne, `CX` = longueur… |
+| `0x00` | change video mode | `AL` = mode |
+| `0x02` | position the cursor | `BH` = page, `DH` = row, `DL` = column |
+| `0x06` | scroll up | `AL`, `CX`, `DX`, `BH`… |
+| **`0x0E`** | **teletype (print 1 character)** | **`AL` = character, `BH` = page, `BL` = color** |
+| `0x13` | print a string | `ES:BP` = string, `CX` = length… |
 
-**C.2 Qui décide que `0x0E` = téléscripteur ?** **IBM**, dans la spécification du BIOS de
-1981. C'est une **convention publiée et figée**, clonée par tous les BIOS (SeaBIOS inclus).
-Référence canonique : la *Ralf Brown's Interrupt List*. Ce n'est ni le matériel ni le hasard :
-c'est un **contrat d'API**, un numéro convenu d'avance — comme `0x7C00` ou `0xAA55`.
+**C.2 Who decides that `0x0E` = teletype?** **IBM**, in the 1981 BIOS
+specification. It's a **published, frozen convention**, cloned by every BIOS (SeaBIOS included).
+Canonical reference: *Ralf Brown's Interrupt List*. It's neither the hardware nor chance:
+it's an **API contract**, a number agreed upon in advance — like `0x7C00` or `0xAA55`.
 
-**C.3 Les registres = les paramètres.** En real mode, pas de passage d'arguments par la pile
-comme en C : **les arguments transitent par les registres**, et la routine BIOS les y lit
-directement. D'où la grille de lecture :
+**C.3 The registers = the parameters.** In real mode, no passing arguments on the stack
+like in C: **the arguments travel through the registers**, and the BIOS routine reads them
+there directly. Hence the reading grid:
 
-- `int 0x10` = **quel service** (vidéo) ;
-- `AH` = **quelle sous-fonction** (le « sélecteur de méthode ») ;
-- `AL`, `BH`, `BL`… = **les arguments** de cette sous-fonction.
+- `int 0x10` = **which service** (video) ;
+- `AH` = **which sub-function** (the "method selector") ;
+- `AL`, `BH`, `BL`… = **the arguments** of that sub-function.
 
-Donc « il affiche `AL` » parce que la spec de la fonction `0x0E` *dit* que le caractère est
-dans `AL`. Le BIOS, voyant `AH=0x0E`, va lire `AL`.
+So "it prints `AL`" because the spec of function `0x0E` *says* the character is
+in `AL`. The BIOS, seeing `AH=0x0E`, goes to read `AL`.
 
-**C.4 Le même bout de code, en Python.** `int 0x10` ≈ une grosse fonction qui *dispatche* sur
-`AH` et lit ses arguments dans des « registres » :
+**C.4 The same piece of code, in Python.** `int 0x10` ≈ a big function that *dispatches* on
+`AH` and reads its arguments from "registers":
 
 ```python
 def int_10h(regs):
-    if regs.AH == 0x00:        # changer de mode vidéo
+    if regs.AH == 0x00:        # change video mode
         set_video_mode(regs.AL)
-    elif regs.AH == 0x02:      # positionner le curseur
+    elif regs.AH == 0x02:      # position the cursor
         set_cursor(page=regs.BH, row=regs.DH, col=regs.DL)
-    elif regs.AH == 0x0E:      # téléscripteur
-        put_char(chr(regs.AL), page=regs.BH)   # <-- lit AL et BH
+    elif regs.AH == 0x0E:      # teletype
+        put_char(chr(regs.AL), page=regs.BH)   # <-- reads AL and BH
         advance_cursor()
-    # ... autres sous-fonctions ...
+    # ... other sub-functions ...
 ```
 
-Et l'assembleur :
+And the assembly:
 
 ```nasm
 mov ah, 0x0E
@@ -278,33 +278,33 @@ mov al, 'X'
 int 0x10
 ```
 
-… équivaut **exactement** à :
+… is **exactly** equivalent to:
 
 ```python
-regs.AH = 0x0E       # je veux la fonction "téléscripteur"
-regs.AL = ord('X')   # le caractère
-int_10h(regs)        # appel
+regs.AH = 0x0E       # I want the "teletype" function
+regs.AL = ord('X')   # the character
+int_10h(regs)        # call
 ```
 
-Les `mov` = « remplir les cases d'arguments » ; `int 0x10` = « appeler la fonction ».
+The `mov`s = "fill in the argument slots" ; `int 0x10` = "call the function".
 
-**C.5 Comment `int n` atteint réellement le BIOS : l'IVT.** En real mode, il existe à
-l'adresse `0x0000` une **table des vecteurs d'interruption (IVT)** : 256 entrées, chacune un
-pointeur `segment:offset` vers une routine. `int 0x10` fait : *« va lire l'entrée n°`0x10` de
-l'IVT, et saute à la routine qui y est inscrite »*. Le BIOS a installé sa routine vidéo dans
-ce slot au démarrage. Elle s'exécute, lit tes registres, fait le travail, puis revient avec
+**C.5 How `int n` actually reaches the BIOS: the IVT.** In real mode, there exists at
+address `0x0000` an **interrupt vector table (IVT)**: 256 entries, each a
+`segment:offset` pointer to a routine. `int 0x10` does: *"go read entry no. `0x10` of
+the IVT, and jump to the routine registered there"*. The BIOS installed its video routine in
+this slot at startup. It runs, reads your registers, does the work, then returns with
 `iret`.
 
 ```
-int 0x10  →  CPU lit IVT[0x10]  →  saute à la routine vidéo du BIOS
-          →  la routine lit AH (=0x0E), AL, BH  →  écrit dans 0xB8000  →  iret (retour)
+int 0x10  →  CPU reads IVT[0x10]  →  jumps to the BIOS video routine
+          →  the routine reads AH (=0x0E), AL, BH  →  writes to 0xB8000  →  iret (return)
 ```
 
-**C.6 C'est l'ancêtre des appels système.** Un syscall Linux, c'est le même patron : `eax` =
-numéro du syscall (le sélecteur), `ebx/ecx/…` = arguments, puis `int 0x80` (ou `syscall`).
-`int 0x10` + `AH` = exactement ça : **un numéro qui dispatche + des registres-arguments + une
-instruction qui transfère la main à du code de service.**
+**C.6 It's the ancestor of system calls.** A Linux syscall is the same pattern: `eax` =
+syscall number (the selector), `ebx/ecx/…` = arguments, then `int 0x80` (or `syscall`).
+`int 0x10` + `AH` = exactly that: **a number that dispatches + register-arguments + an
+instruction that hands control to service code.**
 
-> **Point clé.** `AH`/`AL` sont les deux moitiés d'`AX` : la convention met le **sélecteur**
-> dans `AH` et la **donnée** dans `AL`, ce qui permet de charger les deux d'un coup —
-> `mov ax, 0x0E58` met `AH=0x0E` et `AL=0x58` ('X'). Compact et idiomatique.
+> **Key point.** `AH`/`AL` are the two halves of `AX`: the convention puts the **selector**
+> in `AH` and the **data** in `AL`, which lets you load both at once —
+> `mov ax, 0x0E58` sets `AH=0x0E` and `AL=0x58` ('X'). Compact and idiomatic.

@@ -1,96 +1,94 @@
-# naos — HOWTO : construire un OS x86 de zéro
+# naos — HOWTO: building an x86 OS from scratch
 
-> Guide **rejouable** et **formateur**. Parti d'une machine vierge, vous reproduisez naos
-> brique par brique, en comprenant le *pourquoi* de chaque étape. Compagnon de `PLAN.md`
-> (la feuille de route, le *quoi*) et de `DESIGN-LOG.md` (les décisions, le *pourquoi des
-> choix*) ; ici, c'est la **recette pas-à-pas**.
+> A **reproducible** and **instructional** guide. Starting from a clean machine, you rebuild
+> naos brick by brick, understanding the *why* of every step. Companion to `PLAN.md` (the
+> roadmap, the *what*) and `DESIGN-LOG.md` (the decisions, the *why behind the choices*); here
+> is the **step-by-step recipe**.
 
-## Sommaire
+## Contents
 
-Ce portail rassemble l'intro commune ; **le guide lui-même est découpé par partie**, un
-fichier par brique sous [`howto/`](howto/) (plus facile à lire et à maintenir) :
+This portal holds the shared intro; **the guide itself is split by part**, one file per brick
+under [`howto/`](howto/) (easier to read and maintain):
 
-| Partie | Brique | Fichier |
-|--------|--------|---------|
-| 0 | Setup, QEMU & premier boot | [howto/00-setup.md](howto/00-setup.md) |
-| 1 | B1 — real mode → mode protégé 32 bits | [howto/01-protected-mode.md](howto/01-protected-mode.md) |
-| 2 | B2 — GRUB + Multiboot + premier kernel C | [howto/02-multiboot.md](howto/02-multiboot.md) |
-| 3 | B3 — driver écran VGA | [howto/03-vga.md](howto/03-vga.md) |
-| — | Annexes A (asm x86) · B (`boot.asm` ligne à ligne) · C (`int 0x10`) | [howto/annexes.md](howto/annexes.md) |
+| Part | Brick | File |
+|------|-------|------|
+| 0 | Setup, QEMU & first boot | [howto/00-setup.md](howto/00-setup.md) |
+| 1 | B1 — real mode → 32-bit protected mode | [howto/01-protected-mode.md](howto/01-protected-mode.md) |
+| 2 | B2 — GRUB + Multiboot + first C kernel | [howto/02-multiboot.md](howto/02-multiboot.md) |
+| 3 | B3 — VGA text driver | [howto/03-vga.md](howto/03-vga.md) |
+| — | Appendices A (x86 asm) · B (`boot.asm` line by line) · C (`int 0x10`) | [howto/annexes.md](howto/annexes.md) |
 
-Sur cette page : [Objectif](#objectif) · [Prérequis](#prérequis) ·
-[Comment lire ce guide](#comment-lire-ce-guide) · [Les briques](#les-briques).
+On this page: [Goal](#goal) · [Prerequisites](#prerequisites) ·
+[How to read this guide](#how-to-read-this-guide) · [The bricks](#the-bricks).
 
-## Objectif
+## Goal
 
-À la fin de ce guide, vous aurez :
+By the end of this guide, you'll have:
 
-- un OS x86 **32-bit** qui boote dans QEMU, du secteur de boot au multitâche ;
-- **compris chaque couche** : real mode, mode protégé, GDT/IDT, interruptions, mémoire
-  physique, paging, heap, ordonnanceur ;
-- une **chaîne de build reproductible** (cross-compiler `i686-elf-gcc`, Makefile) ;
-- la capacité de **rejouer ou modifier chaque brique** de façon autonome.
+- a **32-bit** x86 OS that boots in QEMU, from boot sector to multitasking;
+- **understood every layer**: real mode, protected mode, GDT/IDT, interrupts, physical
+  memory, paging, heap, scheduler;
+- a **reproducible build chain** (`i686-elf-gcc` cross-compiler, Makefile);
+- the ability to **replay or modify each brick** on your own.
 
-### Prérequis
+### Prerequisites
 
-- Linux (ou WSL2 / macOS avec adaptations mineures), à l'aise en ligne de commande.
-- **Aucune** connaissance préalable de l'assembleur ou de l'architecture x86 n'est requise :
-  chaque concept est introduit au moment où il sert.
+- Linux (or WSL2 / macOS with minor tweaks), comfortable on the command line.
+- **No** prior knowledge of assembly or the x86 architecture is required: each concept is
+  introduced the moment it's needed.
 
-## Comment lire ce guide
+## How to read this guide
 
-Le guide suit des conventions stables, à connaître une fois :
+The guide follows stable conventions, worth learning once:
 
-> **`commande`** — encadré qui précède chaque commande importante : ce qu'elle fait, en une
-> phrase. On comprend *avant* d'exécuter.
+> **`command`** — a callout before each important command: what it does, in one sentence.
+> Understand *before* running.
 
 ```bash
-# bloc de code copiable, à exécuter tel quel
-echo "exemple"
+# copy-pasteable code block, run as is
+echo "example"
 ```
 
-> **Pourquoi ?** — aparté qui explique le raisonnement derrière une étape. À lire pour
-> *comprendre*, pas seulement copier.
+> **Why?** — an aside explaining the reasoning behind a step. Read it to *understand*, not
+> just to copy.
 
-> **Point clé** — à ne pas rater : souvent une vérification, un piège classique, ou une
-> raison pour laquelle « ça ne marche pas ».
+> **Key point** — don't miss it: often a check, a classic pitfall, or a reason why "it
+> doesn't work".
 
-**Squelette de chaque brique (Partie).** Toutes les parties suivent le même plan, pour que
-vous sachiez toujours où vous êtes :
+**Skeleton of each brick (Part).** Every part follows the same plan, so you always know where
+you are:
 
-1. **Concept** — la théorie de la brique, expliquée simplement.
-2. **Termes clés** — le vocabulaire introduit, défini en une ligne.
-3. **Étapes reproductibles** — fichiers à créer et commandes à lancer, copiables tels quels.
-4. **Vérification** — le critère de réussite observable dans QEMU (le même que dans `PLAN.md`).
-5. **Pour aller plus loin** — pièges, variantes, et liens vers les briques suivantes.
+1. **Concept** — the brick's theory, explained simply.
+2. **Key terms** — the vocabulary introduced, defined in one line.
+3. **Reproducible steps** — files to create and commands to run, copy-pasteable.
+4. **Verification** — the success criterion observable in QEMU (the same as in `PLAN.md`).
+5. **Going further** — pitfalls, variants, and links to the next bricks.
 
-> **Point clé — règle du projet.** Une brique n'est « finie » que lorsque sa Partie ici
-> permet de la **rejouer intégralement** depuis zéro. Le HOWTO est écrit *en parallèle* du
-> code, jamais après coup.
+> **Key point — project rule.** A brick is "done" only when its Part here lets you **replay it
+> in full** from scratch. The HOWTO is written *alongside* the code, never after the fact.
 
-## Les briques
+## The bricks
 
-Chaque brique correspond à une Partie de ce guide (remplie au fil de l'eau). Voir `PLAN.md`
-pour le détail des concepts et critères.
+Each brick maps to a Part of this guide (filled in as we go). See `PLAN.md` for the details of
+concepts and criteria.
 
-| Partie | Brique | Statut |
-|--------|--------|--------|
-| [0](howto/00-setup.md) | B0 — Setup & "It boots" (toolchain, Makefile, structure) | ✅ fait |
-| [1](howto/01-protected-mode.md) | B1 — Boot sector maison (real mode → mode protégé) | ✅ fait |
-| [2](howto/02-multiboot.md) | B2 — GRUB/Multiboot + kernel C | ✅ fait |
-| [3](howto/03-vga.md) | B3 — Driver écran VGA | ✅ fait |
-| 4  | B4 — GDT propre (kernel) | à venir |
-| 5  | B5 — IDT + interruptions | à venir |
-| 6  | B6 — Clavier + timer | à venir |
-| 7  | B7 — Mémoire physique | à venir |
-| 8  | B8 — Paging (mémoire virtuelle) | à venir |
-| 9  | B9 — Heap kernel | à venir |
-| 10 | B10 — Multitâche | à venir |
-| 11 | B11 — Bootloader maison *(optionnel, tardif)* | à venir |
-| 12 | B12 — Passage en 64-bit *(optionnel, tardif)* | à venir |
+| Part | Brick | Status |
+|------|-------|--------|
+| [0](howto/00-setup.md) | B0 — Setup & "It boots" (toolchain, Makefile, structure) | ✅ done |
+| [1](howto/01-protected-mode.md) | B1 — Home-made boot sector (real mode → protected mode) | ✅ done |
+| [2](howto/02-multiboot.md) | B2 — GRUB/Multiboot + C kernel | ✅ done |
+| [3](howto/03-vga.md) | B3 — VGA screen driver | ✅ done |
+| 4  | B4 — Proper GDT (kernel) | planned |
+| 5  | B5 — IDT + interrupts | planned |
+| 6  | B6 — Keyboard + timer | planned |
+| 7  | B7 — Physical memory | planned |
+| 8  | B8 — Paging (virtual memory) | planned |
+| 9  | B9 — Kernel heap | planned |
+| 10 | B10 — Multitasking | planned |
+| 11 | B11 — Home-made bootloader *(optional, late)* | planned |
+| 12 | B12 — Switch to 64-bit *(optional, late)* | planned |
 
 ---
 
-> **Les parties sont dans [`howto/`](howto/)** — une par brique, ajoutée au fil de l'eau
-> (chacune suit le squelette ci-dessus). Commence par [howto/00-setup.md](howto/00-setup.md).
-
+> **The parts live in [`howto/`](howto/)** — one per brick, added as we go (each follows the
+> skeleton above). Start with [howto/00-setup.md](howto/00-setup.md).

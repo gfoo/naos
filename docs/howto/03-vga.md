@@ -1,45 +1,45 @@
-[← Sommaire du HOWTO](../HOWTO.md)
+[← HOWTO contents](../HOWTO.md)
 
-## Partie 3 — B3 : driver écran VGA
+## Part 3 — B3: VGA screen driver
 
-En B2, `kmain` écrivait à `0xB8000` à la main, octet par octet. Ce n'est pas tenable : on veut
-un vrai **driver écran** — une petite API (`vga_write`, couleurs, défilement) sur laquelle tout
-le reste de l'OS affichera. B3 transforme le « poser des octets » en abstraction réutilisable.
+In B2, `kmain` wrote to `0xB8000` by hand, byte by byte. That doesn't scale: we want
+a real **screen driver** — a small API (`vga_write`, colors, scrolling) that everything
+else in the OS will display through. B3 turns "lay down bytes" into a reusable abstraction.
 
-> **Où vit ce code.** `include/vga.h` (l'API), `kernel/vga.c` (l'implémentation),
-> `kernel/kmain.c` (qui s'en sert). Compilés par le même `Makefile` qu'en B2.
+> **Where this code lives.** `include/vga.h` (the API), `kernel/vga.c` (the implementation),
+> `kernel/kmain.c` (which uses it). Compiled by the same `Makefile` as in B2.
 
-**Dans cette partie :**
-- 3.1 — Le buffer texte VGA, en détail
-- 3.2 — L'octet d'attribut : encoder les couleurs
-- 3.3 — L'API et l'état du driver
-- 3.4 — Effacer l'écran : `vga_init`
-- 3.5 — `vga_putchar` : caractères de contrôle, curseur, retour à la ligne
-- 3.6 — Le défilement (scroll)
-- 3.7 — La démo dans `kmain`
-- 3.8 — Vérifier
+**In this part:**
+- 3.1 — The VGA text buffer, in detail
+- 3.2 — The attribute byte: encoding colors
+- 3.3 — The API and the driver state
+- 3.4 — Clearing the screen: `vga_init`
+- 3.5 — `vga_putchar`: control characters, cursor, line wrap
+- 3.6 — Scrolling
+- 3.7 — The demo in `kmain`
+- 3.8 — Verify
 
-**Termes clés (référence rapide) :**
+**Key terms (quick reference):**
 
-- **Buffer texte VGA** — RAM mappée à `0xB8000` : 80×25 **cellules** de 2 octets, affichée par le matériel.
-- **Cellule** — `uint16_t` : octet bas = caractère (CP437), octet haut = **attribut** couleur.
-- **Attribut** — 1 octet : bits 0-3 = avant-plan, bits 4-6 = fond, bit 7 = clignotement.
-- **CP437** — le jeu de caractères de la VGA texte (ASCII + accents, semi-graphiques, etc.).
-- **Scroll** — quand le curseur dépasse la 25ᵉ ligne, on remonte tout d'une ligne.
+- **VGA text buffer** — RAM mapped at `0xB8000`: 80×25 2-byte **cells**, displayed by the hardware.
+- **Cell** — `uint16_t`: low byte = character (CP437), high byte = color **attribute**.
+- **Attribute** — 1 byte: bits 0-3 = foreground, bits 4-6 = background, bit 7 = blink.
+- **CP437** — the VGA text character set (ASCII + accents, box-drawing characters, etc.).
+- **Scroll** — when the cursor goes past the 25th row, everything scrolls up by one row.
 
 ---
 
-### 3.1 — Le buffer texte VGA, en détail
+### 3.1 — The VGA text buffer, in detail
 
-Le matériel VGA en mode texte lit en continu une zone de RAM à **`0xB8000`** et l'affiche : une
-grille de **80 colonnes × 25 lignes**. Chaque case est une **cellule de 2 octets** :
+The VGA hardware in text mode continuously reads a region of RAM at **`0xB8000`** and displays it: a
+grid of **80 columns × 25 rows**. Each slot is a **2-byte cell**:
 
 ```
- cellule = | octet 0 : caractère (code CP437) | octet 1 : attribut (couleur) |
- adresse de la cellule (ligne y, colonne x) = 0xB8000 + (y * 80 + x) * 2
+ cell = | byte 0: character (CP437 code) | byte 1: attribute (color) |
+ cell address (row y, column x) = 0xB8000 + (y * 80 + x) * 2
 ```
 
-En C, on traite donc le buffer comme un tableau de `uint16_t` (2 octets) — un mot par cellule :
+In C, we therefore treat the buffer as an array of `uint16_t` (2 bytes) — one word per cell:
 
 ```c
 #define VGA_MEM  ((volatile uint16_t *)0xB8000)
@@ -47,22 +47,22 @@ En C, on traite donc le buffer comme un tableau de `uint16_t` (2 octets) — un 
 #define ROWS 25
 ```
 
-> **Pourquoi `volatile` (rappel B2).** Le compilateur ne doit jamais « optimiser » nos
-> écritures : elles ont un effet de bord matériel (afficher). `volatile` le lui interdit.
+> **Why `volatile` (B2 recap).** The compiler must never "optimize away" our
+> writes: they have a hardware side effect (displaying). `volatile` forbids that.
 
-### 3.2 — L'octet d'attribut : encoder les couleurs
+### 3.2 — The attribute byte: encoding colors
 
-L'octet haut de chaque cellule est l'**attribut**. La VGA texte a **16 couleurs** ; un attribut
-combine avant-plan (4 bits) et fond (3 ou 4 bits) :
+The high byte of each cell is the **attribute**. VGA text has **16 colors**; an attribute
+combines foreground (4 bits) and background (3 or 4 bits):
 
 ```
  bit  7   6 5 4   3 2 1 0
       │   └─┬─┘   └──┬──┘
-   clignote fond  avant-plan
+    blink  bg    foreground
 ```
 
-D'où l'encodage `attribut = avant-plan | (fond << 4)`. On nomme les 16 couleurs dans un `enum`
-(`VGA_BLACK`=0 … `VGA_WHITE`=15) :
+Hence the encoding `attribute = foreground | (background << 4)`. We name the 16 colors in an `enum`
+(`VGA_BLACK`=0 … `VGA_WHITE`=15):
 
 ```c
 void vga_set_color(enum vga_color fg, enum vga_color bg) {
@@ -70,7 +70,7 @@ void vga_set_color(enum vga_color fg, enum vga_color bg) {
 }
 ```
 
-Et une cellule se fabrique en collant caractère + attribut :
+And a cell is built by gluing character + attribute together:
 
 ```c
 static inline uint16_t cell(char c, uint8_t attr) {
@@ -78,31 +78,31 @@ static inline uint16_t cell(char c, uint8_t attr) {
 }
 ```
 
-### 3.3 — L'API et l'état du driver
+### 3.3 — The API and the driver state
 
-`include/vga.h` expose le minimum utile, et le driver garde un petit **état global** (position
-du curseur + couleur courante) :
+`include/vga.h` exposes the useful minimum, and the driver keeps a small **global state** (cursor
+position + current color):
 
 ```c
-void vga_init(void);                              /* efface, curseur (0,0) */
+void vga_init(void);                              /* clear, cursor at (0,0) */
 void vga_set_color(enum vga_color fg, enum vga_color bg);
-void vga_putchar(char c);                         /* le cœur : pose + curseur + scroll */
-void vga_write(const char *s);                    /* boucle sur une chaîne C */
+void vga_putchar(char c);                         /* the core: lay down + cursor + scroll */
+void vga_write(const char *s);                    /* loop over a C string */
 ```
 
 ```c
-static size_t  row, col;     /* curseur logique */
-static uint8_t color;        /* attribut courant */
+static size_t  row, col;     /* logical cursor */
+static uint8_t color;        /* current attribute */
 ```
 
-> **Freestanding, rappel.** Pas de `string.h`, pas de `stdio`. `vga_write` est juste
-> `while (*s) vga_putchar(*s++);`. Les types `uint16_t`/`size_t` viennent de `<stdint.h>` /
-> `<stddef.h>`, fournis par gcc même freestanding (en-têtes « autonomes »).
+> **Freestanding, recap.** No `string.h`, no `stdio`. `vga_write` is just
+> `while (*s) vga_putchar(*s++);`. The types `uint16_t`/`size_t` come from `<stdint.h>` /
+> `<stddef.h>`, provided by gcc even freestanding ("self-contained" headers).
 
-### 3.4 — Effacer l'écran : `vga_init`
+### 3.4 — Clearing the screen: `vga_init`
 
-Effacer = remplir les 80×25 cellules d'espaces avec la couleur courante, puis ramener le
-curseur en haut à gauche :
+Clearing = fill all 80×25 cells with spaces in the current color, then bring the
+cursor back to the top-left:
 
 ```c
 void vga_init(void) {
@@ -114,55 +114,55 @@ void vga_init(void) {
 }
 ```
 
-### 3.5 — `vga_putchar` : caractères de contrôle, curseur, retour à la ligne
+### 3.5 — `vga_putchar`: control characters, cursor, line wrap
 
-C'est le cœur du driver. Il distingue les **caractères de contrôle** (`\n \r \t \b`) du texte
-ordinaire, avance le curseur, gère le retour à la ligne en bout de colonne, et déclenche le
-défilement en bas d'écran :
+This is the core of the driver. It distinguishes **control characters** (`\n \r \t \b`) from
+ordinary text, advances the cursor, handles line wrapping at the end of a column, and triggers
+scrolling at the bottom of the screen:
 
 ```c
 void vga_putchar(char c) {
     switch (c) {
-    case '\n': col = 0; row++;            break;   /* nouvelle ligne */
-    case '\r': col = 0;                   break;   /* retour chariot */
-    case '\b': if (col) col--;            break;   /* effacement arrière */
-    case '\t': col = (col + 8) & ~(size_t)7; break;/* tabulation (multiple de 8) */
+    case '\n': col = 0; row++;            break;   /* newline */
+    case '\r': col = 0;                   break;   /* carriage return */
+    case '\b': if (col) col--;            break;   /* backspace */
+    case '\t': col = (col + 8) & ~(size_t)7; break;/* tab (multiple of 8) */
     default:
         VGA_MEM[row * COLS + col] = cell(c, color);
         col++;
     }
-    if (col >= COLS) { col = 0; row++; }           /* dépassement de colonne -> ligne suivante */
-    if (row >= ROWS) scroll();                     /* dépassement de ligne   -> défilement */
+    if (col >= COLS) { col = 0; row++; }           /* column overflow -> next line */
+    if (row >= ROWS) scroll();                     /* row overflow    -> scroll */
 }
 ```
 
-> **Pourquoi `(col + 8) & ~7`.** C'est l'arrondi au multiple de 8 supérieur : les tabulations
-> tombent sur des colonnes 8, 16, 24… `& ~7` met à zéro les 3 bits bas.
+> **Why `(col + 8) & ~7`.** This rounds up to the next multiple of 8: tabs
+> land on columns 8, 16, 24… `& ~7` zeroes out the low 3 bits.
 
-### 3.6 — Le défilement (scroll)
+### 3.6 — Scrolling
 
-Quand `row` atteint 25, on **remonte** les lignes 1→24 vers 0→23, on **vide** la dernière, et
-on garde le curseur sur cette dernière ligne :
+When `row` reaches 25, we **scroll** rows 1→24 up to 0→23, **clear** the last one, and
+keep the cursor on that last row:
 
 ```c
 static void scroll(void) {
-    for (size_t y = 1; y < ROWS; y++)                       /* remonter d'une ligne */
+    for (size_t y = 1; y < ROWS; y++)                       /* scroll up one row */
         for (size_t x = 0; x < COLS; x++)
             VGA_MEM[(y - 1) * COLS + x] = VGA_MEM[y * COLS + x];
-    for (size_t x = 0; x < COLS; x++)                       /* vider la dernière */
+    for (size_t x = 0; x < COLS; x++)                       /* clear the last one */
         VGA_MEM[(ROWS - 1) * COLS + x] = cell(' ', color);
     row = ROWS - 1;
 }
 ```
 
-> **C'est un défilement « logiciel ».** On recopie réellement la RAM vidéo. La VGA sait aussi
-> défiler « matériellement » (en décalant l'adresse de départ du balayage) — plus rapide, mais
-> plus subtil. Pour B3, la recopie est limpide et largement assez rapide.
+> **This is "software" scrolling.** We actually copy the video RAM. VGA can also
+> scroll "in hardware" (by shifting the scan start address) — faster, but
+> more subtle. For B3, copying is clear and plenty fast enough.
 
-### 3.7 — La démo dans `kmain`
+### 3.7 — The demo in `kmain`
 
-`kmain` exerce tout le driver : un en-tête coloré, puis **30 lignes numérotées** — comme
-l'écran n'en montre que 25, les premières défilent hors champ (preuve du scroll) :
+`kmain` exercises the whole driver: a colored header, then **30 numbered lines** — since
+the screen only shows 25, the first ones scroll off-screen (proof of scrolling):
 
 ```c
 void kmain(void) {
@@ -173,7 +173,7 @@ void kmain(void) {
     vga_write("Booted by GRUB via Multiboot; kmain() runs in 32-bit C.\n\n");
 
     vga_set_color(VGA_LIGHT_CYAN, VGA_BLACK);
-    for (unsigned int i = 1; i <= 30; i++) {           /* 30 > 25 -> ça défile */
+    for (unsigned int i = 1; i <= 30; i++) {           /* 30 > 25 -> it scrolls */
         vga_write("  line "); put_uint(i); vga_putchar('\n');
     }
     vga_set_color(VGA_LIGHT_GREEN, VGA_BLACK);
@@ -182,23 +182,23 @@ void kmain(void) {
 }
 ```
 
-`put_uint` est un mini-`itoa` local (pas de `printf` en freestanding) : il imprime un entier en
-décomposant ses chiffres. Un vrai `printf`-like viendra plus tard.
+`put_uint` is a local mini itoa (no `printf` in freestanding): it prints an integer by
+breaking it down into digits. A real `printf`-like will come later.
 
-### 3.8 — Vérifier
+### 3.8 — Verify
 
 ```bash
-make run-b3                   # (= make run : B3 est la dernière brique) ; run-kernel pour itérer
-make run-b3 QMP=1             # (autre terminal) python3 tools/qemu-shot.py
+make run-b3                   # (= make run: B3 is the latest brick); run-kernel to iterate
+make run-b3 QMP=1             # (other terminal) python3 tools/qemu-shot.py
 ```
 
-Attendu : un en-tête vert/gris, puis des lignes cyan numérotées dont les premières ont
-**défilé** hors de l'écran, et « naos B3: scroll OK. » en bas. Texte **formaté + couleurs +
-défilement** : **critère B3 atteint.**
+Expected: a green/grey header, then numbered cyan lines whose first ones have
+**scrolled** off the screen, and "naos B3: scroll OK." at the bottom. **Formatted text + colors +
+scrolling**: **B3 criterion met.**
 
-> **Suite (B3+) — la police.** Remplacer la police CP437 de la ROM par la nôtre (cf.
-> `tools/vgafont.py`, `assets/fonts/ibm_vga_8x16.bin`) se fait en écrivant dans le générateur
-> de caractères VGA — étape ultérieure du driver.
+> **Next (B3+) — the font.** Replacing the CP437 font from ROM with our own (see
+> `tools/vgafont.py`, `assets/fonts/ibm_vga_8x16.bin`) is done by writing into the VGA
+> character generator — a later step of the driver.
 
 ---
 

@@ -1,59 +1,59 @@
-[← Sommaire du HOWTO](../HOWTO.md)
+[← HOWTO contents](../HOWTO.md)
 
-## Partie 0 — Setup, QEMU & premier boot
+## Part 0 — Setup, QEMU & first boot
 
-B0 a un seul but : avoir une **chaîne de build qui marche** et la **preuve** qu'on peut
-exécuter notre propre code sur la machine (émulée). Pas encore de mode protégé, de GDT ni de
-C — ce sera B1 et B2. Ici, on pose le décor et on fait afficher une ligne à un boot sector.
+B0 has a single goal: to have a **build chain that works** and the **proof** that we can
+run our own code on the (emulated) machine. No protected mode, no GDT and no C yet — that
+comes in B1 and B2. Here, we set the stage and get a boot sector to print one line.
 
-> **Lancer une brique.** Il n'y a **pas** de `make run` générique : chaque brique a sa cible
-> nommée — **`make run-b0`** (cette partie), **`make run-b1`** (Partie 1), `run-b2`, `run-b3`…
-> Ainsi on sait toujours *quelle* brique on lance. B0/B1 sont des binaires plats (depuis
-> `boot/boot.asm.b0` / `.b1`) ; B2+ des kernels chargés par GRUB. **Toute cette Partie 0 se
-> lance avec `make run-b0`.**
+> **Launching a brick.** There is **no** generic `make run`: each brick has its own named
+> target — **`make run-b0`** (this part), **`make run-b1`** (Part 1), `run-b2`, `run-b3`…
+> That way we always know *which* brick we're launching. B0/B1 are flat binaries (from
+> `boot/boot.asm.b0` / `.b1`); B2+ are kernels loaded by GRUB. **All of Part 0 is launched
+> with `make run-b0`.**
 
-**Dans cette partie :**
-- 0.1 — Le décor : QEMU, un PC complet en logiciel
-- 0.2 — La chaîne complète : du bouton power à ton code
-- 0.3 — Le boot sector, construit pas à pas
-- 0.4 — L'affichage en profondeur (le grand oublié)
-- 0.5 — Lire le binaire avec `hexdump`
-- 0.6 — Vérifier dans QEMU
+**In this part:**
+- 0.1 — The stage: QEMU, a complete PC in software
+- 0.2 — The full chain: from the power button to your code
+- 0.3 — The boot sector, built step by step
+- 0.4 — Display in depth (the great forgotten one)
+- 0.5 — Reading the binary with `hexdump`
+- 0.6 — Verify in QEMU
 
-**Termes clés (référence rapide) :**
+**Key terms (quick reference):**
 
-- **Real mode** — le mode 16 bits dans lequel le CPU démarre, compatible 8086 (1978).
-- **Firmware** — le logiciel gravé dans la machine, qui s'exécute avant tout OS (ici SeaBIOS, fourni par QEMU).
-- **Boot sector** — les 512 premiers octets d'un disque bootable.
-- **`0x7C00`** — l'adresse où le firmware charge le boot sector (convention IBM, 1981).
-- **`0xAA55`** — signature obligatoire aux offsets 510-511, sinon disque non-bootable.
-- **Binaire plat** — du code machine brut, sans en-tête de format (pas d'ELF).
-- **`int 0x10`** — service d'affichage fourni par le BIOS (real mode uniquement).
-- **`0xB8000`** — la mémoire vidéo texte (ce que le matériel VGA affiche).
+- **Real mode** — the 16-bit mode the CPU starts in, 8086-compatible (1978).
+- **Firmware** — the software burned into the machine, which runs before any OS (here SeaBIOS, provided by QEMU).
+- **Boot sector** — the first 512 bytes of a bootable disk.
+- **`0x7C00`** — the address where the firmware loads the boot sector (IBM convention, 1981).
+- **`0xAA55`** — mandatory signature at offsets 510-511, otherwise the disk is non-bootable.
+- **Flat binary** — raw machine code, with no format header (no ELF).
+- **`int 0x10`** — display service provided by the BIOS (real mode only).
+- **`0xB8000`** — the VGA text video memory (what the VGA hardware displays).
 
 ---
 
-### 0.1 — Le décor : QEMU, un PC complet en logiciel
+### 0.1 — The stage: QEMU, a complete PC in software
 
-QEMU n'est pas « un lanceur de programme » : c'est un **ordinateur entier émulé en logiciel**,
-firmware compris. Faire `make run-b0`, c'est *allumer un PC virtuel*.
+QEMU is not "a program launcher": it's an **entire computer emulated in software**,
+firmware included. Running `make run-b0` is *powering on a virtual PC*.
 
-Ce que tu fixes, et ce que QEMU fournit tout seul :
+What you set, and what QEMU provides on its own:
 
-| Composant | Comment / flag | Tu le fournis ? |
+| Component | How / flag | Do you provide it? |
 |---|---|---|
-| CPU | `qemu-system-i386` (x86 32 bits) | tu le choisis |
-| RAM | `-m 128M` (défaut suffisant) | optionnel |
-| Disque | `-drive format=raw,file=...` | **oui** (notre image) |
-| **ROM + firmware** | **SeaBIOS, chargé d'office** | ❌ non — QEMU le donne |
-| Écran VGA, clavier PS/2 | automatiques | non |
+| CPU | `qemu-system-i386` (x86 32-bit) | you choose it |
+| RAM | `-m 128M` (default is enough) | optional |
+| Disk | `-drive format=raw,file=...` | **yes** (our image) |
+| **ROM + firmware** | **SeaBIOS, loaded by default** | ❌ no — QEMU provides it |
+| VGA screen, PS/2 keyboard | automatic | no |
 
-#### Installer les dépendances (Debian/Ubuntu)
+#### Installing the dependencies (Debian/Ubuntu)
 
-B0 ne requiert que l'assembleur **NASM** et l'émulateur **QEMU**.
+B0 only requires the **NASM** assembler and the **QEMU** emulator.
 
-> **`apt install nasm qemu-system-x86`** — installe NASM et la suite QEMU (qui fournit
-> `qemu-system-i386`, notre émulateur 32 bits).
+> **`apt install nasm qemu-system-x86`** — installs NASM and the QEMU suite (which provides
+> `qemu-system-i386`, our 32-bit emulator).
 
 ```bash
 sudo apt update
@@ -62,169 +62,169 @@ nasm --version
 qemu-system-i386 --version
 ```
 
-#### Créer la structure du projet
+#### Creating the project structure
 
 ```bash
 mkdir -p boot kernel include toolchain build
 ```
 
-| Dossier | Rôle |
+| Directory | Role |
 |---|---|
-| `boot/` | code d'amorçage (assembleur) |
-| `kernel/` | code du noyau (C, à partir de B2) |
-| `include/` | en-têtes partagés |
-| `toolchain/` | scripts d'outillage (cross-compiler, pour B2) |
-| `build/` | artefacts générés (ignoré par git) |
+| `boot/` | bootstrap code (assembly) |
+| `kernel/` | kernel code (C, starting at B2) |
+| `include/` | shared headers |
+| `toolchain/` | tooling scripts (cross-compiler, for B2) |
+| `build/` | generated artifacts (git-ignored) |
 
-#### La commande de lancement, flag par flag
+#### The launch command, flag by flag
 
-> **`qemu-system-i386 -drive format=raw,file=build/naos.img`** — allume un PC virtuel x86
-> 32 bits avec notre image comme disque dur.
+> **`qemu-system-i386 -drive format=raw,file=build/naos.img`** — powers on a 32-bit x86
+> virtual PC with our image as the hard disk.
 
-- `qemu-system-i386` : l'émulateur, CPU x86 32 bits.
-- `-drive format=raw,file=...` : branche notre image comme disque. `raw` = octets bruts (pas
-  un format compressé type `qcow2`).
-- Le **firmware (SeaBIOS) est chargé automatiquement** — on ne le précise jamais.
+- `qemu-system-i386`: the emulator, 32-bit x86 CPU.
+- `-drive format=raw,file=...`: attaches our image as a disk. `raw` = raw bytes (not
+  a compressed format like `qcow2`).
+- The **firmware (SeaBIOS) is loaded automatically** — we never specify it.
 
-Des flags qui resserviront (debug et vérification) :
+Flags that will come in handy later (debugging and verification):
 
-| Flag | Rôle |
+| Flag | Role |
 |---|---|
-| `-display none` | pas de fenêtre (mode « headless ») |
-| `-no-reboot` | **quitter** au lieu de redémarrer → révèle les triple-faults |
-| `-d int,cpu_reset -D fichier.log` | journalise interruptions et resets CPU |
-| `-s` | ouvre un stub **GDB** sur le port 1234 |
-| `-S` | **gèle** le CPU au démarrage (attend GDB) |
-| `-qmp unix:sock,server,nowait` | pilotage programmatique (capture d'écran, état) |
+| `-display none` | no window ("headless" mode) |
+| `-no-reboot` | **quit** instead of rebooting → reveals triple faults |
+| `-d int,cpu_reset -D file.log` | logs interrupts and CPU resets |
+| `-s` | opens a **GDB** stub on port 1234 |
+| `-S` | **freezes** the CPU at startup (waits for GDB) |
+| `-qmp unix:sock,server,nowait` | programmatic control (screenshot, state) |
 
-Le `Makefile` expose une cible de lancement **par brique** (et une de debug) :
+The `Makefile` exposes a launch target **per brick** (and one for debugging):
 
-> **`make run-b0`** — assemble, fabrique l'image, lance QEMU (fenêtre normale).
-> **`make debug`** — lance QEMU **figé** (`-s -S`), en attente d'un GDB sur `:1234`.
+> **`make run-b0`** — assembles, builds the image, launches QEMU (normal window).
+> **`make debug`** — launches QEMU **frozen** (`-s -S`), waiting for a GDB on `:1234`.
 
 ```bash
-make run-b0  # lancer la brique B0
-make debug   # puis, dans un autre terminal :
+make run-b0  # launch brick B0
+make debug   # then, in another terminal:
              #   gdb -> target remote :1234 -> b *0x7c00 -> continue
 ```
 
-> **Pourquoi `make debug` ?** En real mode (B0/B1), il n'y a ni `printf` ni message d'erreur.
-> GDB te laisse poser un point d'arrêt à `0x7c00` et avancer **instruction par instruction**
-> pour voir les registres. Pour les bugs plus retors de B1 (triple-fault), on sortira
-> **Bochs** (cf. `DESIGN-LOG.md`, C2), dont le débogueur dit *pourquoi* ça plante.
+> **Why `make debug`?** In real mode (B0/B1), there is no `printf` and no error message.
+> GDB lets you set a breakpoint at `0x7c00` and step forward **instruction by instruction**
+> to inspect the registers. For the trickier bugs in B1 (triple fault), we'll bring out
+> **Bochs** (cf. `DESIGN-LOG.md`, C2), whose debugger tells you *why* it crashed.
 
-> **(Optionnel, pour B2) Le cross-compiler.** B0 n'en a pas besoin (boot sector NASM pur),
-> mais on peut le préparer : `./toolchain/build-i686-elf.sh` construit `i686-elf-gcc` dans
-> `~/opt/cross` (~20-40 min). À lancer une seule fois, avant B2.
+> **(Optional, for B2) The cross-compiler.** B0 doesn't need it (pure NASM boot sector),
+> but you can prepare it: `./toolchain/build-i686-elf.sh` builds `i686-elf-gcc` in
+> `~/opt/cross` (~20-40 min). Run once, before B2.
 
 ---
 
-### 0.2 — La chaîne complète : du bouton power à ton code
+### 0.2 — The full chain: from the power button to your code
 
-Il faut distinguer **deux** chaînes : celle de *fabrication* (sur ta machine) et celle
-d'*exécution* (dans QEMU).
+You have to distinguish **two** chains: the *build* chain (on your machine) and the
+*execution* chain (inside QEMU).
 
-#### (a) La chaîne de build — du texte aux octets
+#### (a) The build chain — from text to bytes
 
 ```
-boot/boot.asm   (TEXTE, lisible)
-     │  nasm -f bin        ← traduit le texte en octets machine
+boot/boot.asm   (TEXT, readable)
+     │  nasm -f bin        ← translates the text into machine bytes
      ▼
-build/boot.bin  (512 OCTETS bruts)
+build/boot.bin  (512 raw BYTES)
      │  cp
      ▼
-build/naos.img  (le "disque" que QEMU monte)
-                 └── son secteur 0 = ces 512 octets
+build/naos.img  (the "disk" QEMU mounts)
+                 └── its sector 0 = these 512 bytes
 ```
 
-- Un **secteur** = un bloc de 512 octets sur le disque. Le **secteur 0** = le boot sector.
-  Notre « disque » ne fait qu'un seul secteur.
-- **`boot.asm` (texte) ne va jamais sur le disque** : c'est `boot.bin` (sa traduction) qui y
-  va. Le `.asm` est la recette, le `.bin` est le plat.
+- A **sector** = a 512-byte block on the disk. **Sector 0** = the boot sector.
+  Our "disk" is just a single sector.
+- **`boot.asm` (text) never goes onto the disk**: it's `boot.bin` (its translation) that
+  does. The `.asm` is the recipe, the `.bin` is the dish.
 
-> **Pourquoi deux fichiers, `boot.bin` *et* `naos.img` ?** Ils encodent deux rôles distincts :
-> `boot.bin` = **un composant** (le secteur de boot assemblé, produit de `boot.asm`) ;
-> `naos.img` = **le disque bootable** que QEMU monte (et qu'on `dd`-erait sur une clé USB).
-> En B0 ils sont **identiques** — d'où le simple `cp` — parce que le disque ne contient *que*
-> le boot sector. Mais dès **B2**, l'image grossira :
-> `naos.img = [secteur de boot / GRUB] + [kernel] + …`, **assemblée à partir de plusieurs
-> pièces** (la règle deviendra un « link + assemble », plus un `cp`). Garder `naos.img`
-> distinct dès maintenant stabilise la cible de lancement `make run-b0` (elle lance toujours
-> *l'image*, quel qu'en soit le contenu) et installe le modèle mental **composant vs disque**.
+> **Why two files, `boot.bin` *and* `naos.img`?** They encode two distinct roles:
+> `boot.bin` = **a component** (the assembled boot sector, product of `boot.asm`);
+> `naos.img` = **the bootable disk** that QEMU mounts (and that we'd `dd` onto a USB stick).
+> In B0 they are **identical** — hence the simple `cp` — because the disk contains *only*
+> the boot sector. But as soon as **B2**, the image will grow:
+> `naos.img = [boot sector / GRUB] + [kernel] + …`, **assembled from several
+> pieces** (the rule will become a "link + assemble", not a `cp`). Keeping `naos.img`
+> distinct from the start stabilizes the `make run-b0` launch target (it always launches
+> *the image*, whatever its contents) and installs the **component vs disk** mental model.
 
-#### (b) La chaîne d'exécution — de l'allumage à `0x7C00`
+#### (b) The execution chain — from power-on to `0x7C00`
 
 ```
 power on
-  ▼  0xFFFFFFF0   ← LE CPU démarre ICI (reset vector, câblé par Intel) = le FIRMWARE
-SeaBIOS : POST → cherche un disque bootable → lit le secteur 0
-  ▼  copie les 512 octets à 0x7C00, vérifie 0xAA55, puis jmp 0x7C00
-NOTRE code démarre ICI   ← 0x7C00
+  ▼  0xFFFFFFF0   ← THE CPU STARTS HERE (reset vector, wired by Intel) = the FIRMWARE
+SeaBIOS: POST → looks for a bootable disk → reads sector 0
+  ▼  copies the 512 bytes to 0x7C00, checks 0xAA55, then jmp 0x7C00
+OUR code starts HERE   ← 0x7C00
 ```
 
-Deux « départs » à ne pas confondre :
+Two "starts" not to be confused:
 
-| Adresse | Départ de quoi | Qui la fixe |
+| Address | Start of what | Who sets it |
 |---|---|---|
-| `0xFFFFFFF0` | du **CPU** (le firmware) au power-on | câblé Intel/AMD — on n'y touche jamais |
-| `0x7C00` | de **notre** code | convention IBM 1981 — notre porte d'entrée |
+| `0xFFFFFFF0` | of the **CPU** (the firmware) at power-on | wired by Intel/AMD — we never touch it |
+| `0x7C00` | of **our** code | IBM 1981 convention — our entry point |
 
-#### Trois idées qui rendent la suite limpide
+#### Three ideas that make everything that follows crystal clear
 
-> **Pourquoi `jmp` n'est pas magique.** Le CPU est une boucle infinie : *lire l'instruction
-> à `CS:IP`, l'exécuter, avancer `IP`, recommencer*. Un `jmp X` écrit simplement `X` dans
-> `IP`. « SeaBIOS saute à `0x7C00` » = il met `0x7C00` dans `IP`, et le flux d'exécution
-> (qui n'a jamais cessé) continue dans *nos* octets.
+> **Why `jmp` isn't magic.** The CPU is an infinite loop: *read the instruction
+> at `CS:IP`, execute it, advance `IP`, repeat*. A `jmp X` simply writes `X` into
+> `IP`. "SeaBIOS jumps to `0x7C00`" = it puts `0x7C00` into `IP`, and the execution flow
+> (which never stopped) continues inside *our* bytes.
 
-> **Un label = une adresse.** `start`, `.print` n'existent que dans le source ; NASM les
-> remplace par des nombres. Le firmware ne connaît pas nos labels — il saute à une adresse
-> **en dur** (`0x7C00`), un nombre convenu d'avance entre deux binaires étrangers.
+> **A label = an address.** `start`, `.print` exist only in the source; NASM replaces them
+> with numbers. The firmware doesn't know our labels — it jumps to a **hardcoded**
+> address (`0x7C00`), a number agreed in advance between two foreign binaries.
 
-> **Code et données = les mêmes octets.** Le CPU décode comme « instruction » ce sur quoi
-> `IP` tombe. Rien ne distingue physiquement du code d'une chaîne de texte — d'où
-> l'importance de placer nos données *après* le `hlt` (sinon le CPU les exécuterait).
+> **Code and data = the same bytes.** The CPU decodes whatever `IP` lands on as an
+> "instruction". Nothing physically distinguishes code from a text string — hence
+> the importance of placing our data *after* the `hlt` (otherwise the CPU would execute it).
 
 ---
 
-### 0.3 — Le boot sector, construit pas à pas
+### 0.3 — The boot sector, built step by step
 
-> **Point clé — la bonne méthode.** N'écris **jamais** le boot sector complet d'un coup.
-> Ajoute un petit bout, lance `make run-b0`, observe, recommence. Le jour où ça plante, tu sais
-> que c'est ton dernier ajout — pas un mystère parmi 30 lignes. On construit ici en 4
-> incréments ; **teste après chacun**.
+> **Key point — the right method.** **Never** write the complete boot sector all at once.
+> Add a small piece, run `make run-b0`, observe, repeat. The day it breaks, you know
+> it's your last addition — not a mystery hidden among 30 lines. We build it here in 4
+> increments; **test after each one**.
 
-#### Étape a — le squelette qui boote (et ne fait rien)
+#### Step a — the skeleton that boots (and does nothing)
 
 ```nasm
-bits 16                 ; le CPU démarre en real mode (16 bits)
-org  0x7C00             ; on s'aligne sur l'adresse de chargement du BIOS
+bits 16                 ; the CPU starts in real mode (16-bit)
+org  0x7C00             ; we align on the BIOS load address
 
 start:
-    hlt                 ; arrête le CPU
-    jmp start           ; ... et reboucle s'il est réveillé
+    hlt                 ; halt the CPU
+    jmp start           ; ... and loop back if it's woken up
 
-times 510-($-$$) db 0   ; padding jusqu'à l'octet 510
-dw 0xAA55               ; signature de boot (offsets 510-511)
+times 510-($-$$) db 0   ; padding up to byte 510
+dw 0xAA55               ; boot signature (offsets 510-511)
 ```
 
-`make run-b0` → SeaBIOS affiche `Booting from Hard Disk...`, puis **écran noir**, sans rien
-d'autre. C'est normal : on n'affiche rien encore.
+`make run-b0` → SeaBIOS prints `Booting from Hard Disk...`, then a **black screen**, with
+nothing else. That's normal: we're not displaying anything yet.
 
-> **Que vérifie cette étape ?** Deux choses, sans afficher : (1) **pas** de « No bootable
-> device » → la signature `0xAA55` est reconnue, notre secteur *est* bootable ; (2) **pas**
-> de redémarrage en boucle → on a bien atteint `hlt`, donc notre code s'exécute. Le pipeline
-> complet (build → image → QEMU → notre code) tourne.
+> **What does this step verify?** Two things, without displaying: (1) **no** "No bootable
+> device" → the `0xAA55` signature is recognized, our sector *is* bootable; (2) **no**
+> reboot loop → we did reach `hlt`, so our code runs. The full pipeline
+> (build → image → QEMU → our code) is running.
 
-#### Étape b — afficher UN caractère
+#### Step b — display ONE character
 
 ```nasm
 bits 16
 org  0x7C00
 
 start:
-    mov ah, 0x0E        ; fonction "téléscripteur" du service vidéo BIOS
-    mov al, 'X'         ; le caractère à afficher
-    int 0x10            ; appel du BIOS -> il affiche AL
+    mov ah, 0x0E        ; "teletype" function of the BIOS video service
+    mov al, 'X'         ; the character to display
+    int 0x10            ; BIOS call -> it displays AL
 
 .hang:
     hlt
@@ -234,73 +234,73 @@ times 510-($-$$) db 0
 dw 0xAA55
 ```
 
-`make run-b0` → un `X` apparaît sous les lignes de SeaBIOS. **Preuve : on sait appeler le
-firmware (`int 0x10`) et il affiche.**
+`make run-b0` → an `X` appears under the SeaBIOS lines. **Proof: we know how to call the
+firmware (`int 0x10`) and it displays.**
 
-> **Comment marche cet appel ?** `int 0x10` est une *fonction générique* : `AH` choisit la
-> sous-fonction (`0x0E` = téléscripteur), `AL` porte le caractère. Mécanisme complet
-> (sélecteur, registres-arguments, table des vecteurs, parallèle syscall) :
-> **[Annexe C — `int 0x10` en détail](annexes.md#annexe-c--int-0x10-en-détail-services-bios--interruptions)**.
-> Ce que `int 0x10` fait *à l'écran* est détaillé en [0.4](#04--laffichage-en-profondeur).
+> **How does this call work?** `int 0x10` is a *generic function*: `AH` selects the
+> sub-function (`0x0E` = teletype), `AL` carries the character. Full mechanism
+> (selector, register-arguments, vector table, syscall parallel):
+> **[Appendix C — `int 0x10` in detail](annexes.md#appendix-c--int-0x10-in-detail--bios-services--interrupts)**.
+> What `int 0x10` does *on screen* is detailed in [0.4](#04--display-in-depth).
 
-#### Étape c — afficher une CHAÎNE (la boucle)
+#### Step c — display a STRING (the loop)
 
 ```nasm
 bits 16
 org  0x7C00
 
 start:
-    mov si, msg         ; SI pointe sur le début de la chaîne
+    mov si, msg         ; SI points to the start of the string
 .print:
-    lodsb               ; AL = [SI], puis SI++
-    test al, al         ; octet nul ? -> fin de chaîne
+    lodsb               ; AL = [SI], then SI++
+    test al, al         ; null byte? -> end of string
     jz .hang
     mov ah, 0x0E
     int 0x10
-    jmp .print          ; caractère suivant
+    jmp .print          ; next character
 
 .hang:
     hlt
     jmp .hang
 
-msg db "naos B0: it boots!", 13, 10, 0   ; 13,10 = CR LF ; 0 = fin
+msg db "naos B0: it boots!", 13, 10, 0   ; 13,10 = CR LF ; 0 = end
 times 510-($-$$) db 0
 dw 0xAA55
 ```
 
-`make run-b0` → le message complet. **Preuve : la boucle d'affichage et la donnée `msg`.**
+`make run-b0` → the complete message. **Proof: the display loop and the `msg` data.**
 
-> **Pourquoi `msg` *après* `.hang` ?** Parce que le CPU exécute en séquence : s'il
-> rencontrait les octets de la chaîne, il les décoderait comme des instructions (charabia,
-> puis plantage). En la plaçant après la boucle d'arrêt, le CPU ne l'atteint jamais comme code
-> — seul `lodsb` la *lit comme donnée*.
+> **Why `msg` *after* `.hang`?** Because the CPU executes in sequence: if it
+> ran into the string's bytes, it would decode them as instructions (gibberish,
+> then a crash). By placing it after the halt loop, the CPU never reaches it as code
+> — only `lodsb` *reads it as data*.
 
-#### Étape d — le rituel propre (segments + pile)
+#### Step d — the clean ritual (segments + stack)
 
-Jusqu'ici on a eu de la chance : les segments et la pile étaient dans un état utilisable
-laissé par le BIOS. Pour être **robuste** (et indispensable dès qu'on touchera à la pile), on
-les initialise explicitement. C'est le `boot/boot.asm` **final** de B0 :
+So far we've been lucky: the segments and the stack were in a usable state
+left by the BIOS. To be **robust** (and indispensable as soon as we touch the stack), we
+initialize them explicitly. This is the **final** `boot/boot.asm` of B0:
 
 ```nasm
 bits 16
 org  0x7C00
 
 start:
-    cli                 ; pas d'interruptions pendant qu'on installe les segments
+    cli                 ; no interrupts while we set up the segments
     xor ax, ax          ; AX = 0
-    mov ds, ax          ; DS = ES = SS = 0 : adressage simple, segments à zéro
+    mov ds, ax          ; DS = ES = SS = 0: simple addressing, segments at zero
     mov es, ax
     mov ss, ax
-    mov sp, 0x7C00      ; pile juste sous notre code (croît vers le bas)
-    sti                 ; on réautorise les interruptions (le BIOS en a besoin)
+    mov sp, 0x7C00      ; stack just below our code (grows downward)
+    sti                 ; re-enable interrupts (the BIOS needs them)
 
     mov si, msg
 .print:
     lodsb
     test al, al
     jz .hang
-    mov ah, 0x0E        ; téléscripteur
-    mov bh, 0x00        ; page vidéo 0
+    mov ah, 0x0E        ; teletype
+    mov bh, 0x00        ; video page 0
     int 0x10
     jmp .print
 
@@ -313,123 +313,123 @@ times 510-($-$$) db 0
 dw 0xAA55
 ```
 
-> **Pourquoi ce rituel ?** `cli` : pas d'interruption sur une pile encore incohérente.
-> Segments à 0 : adressage simple en offsets absolus. `sp = 0x7C00` : la pile grandit *sous*
-> notre code, sans l'écraser. `sti` : on réautorise les interruptions, dont `int 0x10` a
-> besoin. **Détail ligne par ligne en [Annexe B](annexes.md#annexe-b--bootbootasm-ligne-par-ligne).**
+> **Why this ritual?** `cli`: no interrupt on a still-inconsistent stack.
+> Segments at 0: simple addressing in absolute offsets. `sp = 0x7C00`: the stack grows *below*
+> our code, without overwriting it. `sti`: we re-enable interrupts, which `int 0x10`
+> needs. **Line-by-line detail in [Appendix B](annexes.md#appendix-b--bootbootasm-line-by-line).**
 
-> **Nouveau ou rouillé en assembleur ?** Voir l'[Annexe A](annexes.md#annexe-a--rappels-dassembleur-x86-real-mode-16-bits)
-> (registres, real mode, syntaxe Intel, instructions, directives NASM).
+> **New or rusty in assembly?** See [Appendix A](annexes.md#appendix-a--x86-assembly-refresher-real-mode-16-bit)
+> (registers, real mode, Intel syntax, instructions, NASM directives).
 
 ---
 
-### 0.4 — L'affichage en profondeur
+### 0.4 — Display in depth
 
-On a affiché via `int 0x10`. Mais que se passe-t-il *vraiment* ? Il faut séparer **deux
-acteurs** : le **firmware** (logiciel) et le **matériel VGA**.
+We displayed via `int 0x10`. But what *really* happens? We have to separate **two
+actors**: the **firmware** (software) and the **VGA hardware**.
 
-#### `int 0x10` = un APPEL au firmware
+#### `int 0x10` = a CALL to the firmware
 
-Ce n'est pas un « registre écran » que le firmware surveille — c'est une **routine qu'on
-invoque**. Elle ne s'exécute que quand on l'appelle, fait son travail, et rend la main. Ses
-paramètres passent par les registres : `AH` = la fonction (`0x0E` = téléscripteur), `AL` = le
-caractère, `BH` = la page vidéo. Le mécanisme complet (`AH` = sélecteur de sous-fonction,
-registres = arguments, IVT, parallèle avec les appels système) est détaillé en
-**[Annexe C](annexes.md#annexe-c--int-0x10-en-détail-services-bios--interruptions)**.
+It is not a "screen register" the firmware watches — it's a **routine that we
+invoke**. It runs only when we call it, does its job, and returns control. Its
+parameters are passed through registers: `AH` = the function (`0x0E` = teletype), `AL` = the
+character, `BH` = the video page. The full mechanism (`AH` = sub-function selector,
+registers = arguments, IVT, parallel with system calls) is detailed in
+**[Appendix C](annexes.md#appendix-c--int-0x10-in-detail--bios-services--interrupts)**.
 
-> **`BH`, c'est quoi ?** Juste l'octet haut de `BX`. Son sens « page vidéo » n'existe que dans
-> la **convention de `int 0x10`** (un standard *du BIOS*, pas des cartes). La *capacité*
-> « pages » vient du matériel VGA (assez de mémoire pour plusieurs écrans) ; le firmware
-> l'expose via `BH`. On met `BH=0` = page affichée par défaut.
+> **What is `BH`?** Just the high byte of `BX`. Its "video page" meaning exists only in
+> the **`int 0x10` convention** (a *BIOS* standard, not a card one). The *capability*
+> of "pages" comes from the VGA hardware (enough memory for several screens); the firmware
+> exposes it via `BH`. We set `BH=0` = the default displayed page.
 
-#### Ce que le firmware fait sous le capot : écrire dans la mémoire vidéo
+#### What the firmware does under the hood: write to video memory
 
-L'écran texte est **mappé en mémoire** à **`0xB8000`**. Cette adresse n'est pas de la RAM :
-c'est la **mémoire de la carte VGA**. Le contrôleur VGA **lit cette zone en continu** (~60×/s)
-et dessine à l'écran ce qu'il y trouve. `int 0x10` ne fait, au fond, qu'**écrire dans
-`0xB8000`** pour toi (en gérant en plus le curseur et le défilement).
+The text screen is **memory-mapped** at **`0xB8000`**. This address is not RAM:
+it's the **memory of the VGA card**. The VGA controller **reads this region continuously** (~60×/s)
+and draws on screen what it finds there. `int 0x10`, at bottom, does nothing but **write to
+`0xB8000`** for you (handling the cursor and scrolling on top of that).
 
-**2 octets par case d'écran :**
-
-```
-0xB8000 : 0x41   ← le CODE du caractère ('A' = 0x41 en ASCII)
-0xB8001 : 0x0F   ← l'ATTRIBUT : couleur (nibble bas = texte, nibble haut = fond)
-                   0x0F = texte blanc (F) sur fond noir (0)
-```
-
-Un écran 80×25 = 2000 cases × 2 octets = 4000 octets à partir de `0xB8000`.
-
-#### Comment le VGA « connaît » la forme du 'A' : la police CP437
-
-Le matériel ne devine pas la forme — il fait un **lookup dans une table de police** (le
-*character generator*) qui associe chaque code (0–255) à un **bitmap** (grille de ~8×16
-pixels). Pour chaque case : lit le code → trouve le glyphe → peint les pixels avec les
-couleurs de l'attribut. La police par défaut, **CP437**, est chargée au boot par le firmware
-vidéo.
-
-> **Le « super truc » (à venir en B3).** On pourra **remplacer CP437** par notre propre
-> police : charger nos bitmaps dans le générateur de caractères du VGA → nos propres glyphes
-> en mode texte. C'est un exercice du **pilote écran (B3)**, où l'on programme directement le
-> matériel VGA.
-
-#### La chaîne ASCII unifiée
-
-Le même code `0x6E` (le 'n') traverse **tout le système, sans aucune conversion** :
+**2 bytes per screen cell:**
 
 ```
-source 'n'  →  NASM: octet 0x6E  →  lodsb: AL=0x6E  →  0xB8000: 0x6E  →  police: glyphe 'n'
+0xB8000 : 0x41   ← the CODE of the character ('A' = 0x41 in ASCII)
+0xB8001 : 0x0F   ← the ATTRIBUTE: color (low nibble = text, high nibble = background)
+                   0x0F = white text (F) on black background (0)
 ```
 
-ASCII est la **langue commune** de la source, de la mémoire et de l'écran (et du clavier en
-B6). C'est pourquoi écrire `0x6E` à `0xB8000` affiche 'n', sans traduction intermédiaire.
+An 80×25 screen = 2000 cells × 2 bytes = 4000 bytes starting at `0xB8000`.
 
-> **Point clé — NASM ne connaît pas CP437.** Cette chaîne marche par *coïncidence* : NASM ne
-> *convertit* rien, il recopie l'octet du caractère tel qu'il est dans ton fichier source (=
-> ASCII pour les caractères de base, d'où `'n'` → `0x6E`). Et ça tombe juste **parce que les
-> 128 premiers codes de CP437 *sont* l'ASCII** (CP437 a été conçue comme une extension
-> d'ASCII). Au-delà de `0x7F`, les deux **divergent** :
+#### How the VGA "knows" the shape of the 'A': the CP437 font
+
+The hardware doesn't guess the shape — it does a **lookup in a font table** (the
+*character generator*) that maps each code (0–255) to a **bitmap** (a grid of ~8×16
+pixels). For each cell: read the code → find the glyph → paint the pixels with the
+colors from the attribute. The default font, **CP437**, is loaded at boot by the video
+firmware.
+
+> **The "neat trick" (coming in B3).** We'll be able to **replace CP437** with our own
+> font: load our bitmaps into the VGA's character generator → our own glyphs
+> in text mode. This is an exercise of the **screen driver (B3)**, where we program the
+> VGA hardware directly.
+
+#### The unified ASCII chain
+
+The same code `0x6E` (the 'n') travels across **the entire system, with no conversion at all**:
+
+```
+source 'n'  →  NASM: byte 0x6E  →  lodsb: AL=0x6E  →  0xB8000: 0x6E  →  font: glyph 'n'
+```
+
+ASCII is the **common language** of the source, of memory and of the screen (and of the keyboard in
+B6). That's why writing `0x6E` to `0xB8000` displays 'n', with no intermediate translation.
+
+> **Key point — NASM doesn't know CP437.** This chain works by *coincidence*: NASM does not
+> *convert* anything, it copies the character's byte as it is in your source file (=
+> ASCII for the basic characters, hence `'n'` → `0x6E`). And it happens to be right **because the
+> first 128 codes of CP437 *are* ASCII** (CP437 was designed as an extension
+> of ASCII). Beyond `0x7F`, the two **diverge**:
 >
-> | 'é' selon… | octet(s) |
+> | 'é' according to… | byte(s) |
 > |---|---|
-> | source UTF-8 (ce que NASM recopie) | `0xC3 0xA9` (deux octets !) |
-> | CP437 (ce que le VGA affiche) | `0x82` |
+> | UTF-8 source (what NASM copies) | `0xC3 0xA9` (two bytes!) |
+> | CP437 (what the VGA displays) | `0x82` |
 >
-> Un `'é'` tapé dans une chaîne serait donc émis en UTF-8 et interprété en CP437 → **charabia
-> à l'écran**. D'où la règle : **messages de boot en ASCII pur** ; pour un caractère spécial,
-> écris son code CP437 en dur (`db 0x82` pour 'é'), ne le tape pas dans une chaîne.
+> An `'é'` typed in a string would therefore be emitted in UTF-8 and interpreted in CP437 → **gibberish
+> on screen**. Hence the rule: **boot messages in pure ASCII**; for a special character,
+> write its CP437 code as a literal (`db 0x82` for 'é'), don't type it in a string.
 
-#### Le partage des rôles, et les deux voies
+#### The division of roles, and the two paths
 
-| Qui | Fait quoi |
+| Who | Does what |
 |---|---|
-| **toi** | fournis la donnée (code de caractère + attribut couleur) |
-| **matériel VGA** | scrute `0xB8000`, fait le lookup police, peint les pixels |
-| **firmware** | (B0) emballe « écrire dans `0xB8000` » dans `int 0x10` ; a chargé CP437 au boot |
+| **you** | provide the data (character code + color attribute) |
+| **VGA hardware** | scans `0xB8000`, does the font lookup, paints the pixels |
+| **firmware** | (B0) wraps "write to `0xB8000`" in `int 0x10`; loaded CP437 at boot |
 
 ```
-B0 (real mode)    : ton code ──int 0x10──> [BIOS écrit dans 0xB8000] ──> VGA affiche
-B3 (mode protégé) : ton code ──écrit toi-même dans 0xB8000──────────> VGA affiche
+B0 (real mode)      : your code ──int 0x10──> [BIOS writes to 0xB8000] ──> VGA displays
+B3 (protected mode) : your code ──write to 0xB8000 yourself──────────> VGA displays
 ```
 
-> **Point clé — pourquoi `0xB8000` est central.** `int 0x10` (firmware) **disparaît** en mode
-> protégé, mais `0xB8000` (matériel) **marche toujours**, quel que soit le mode CPU. C'est
-> pour ça qu'écrire à `0xB8000` sera la **preuve de B1** (on affiche sans le BIOS) et le cœur
-> du **driver écran de B3**.
+> **Key point — why `0xB8000` is central.** `int 0x10` (firmware) **disappears** in protected
+> mode, but `0xB8000` (hardware) **still works**, whatever the CPU mode. That's
+> why writing to `0xB8000` will be the **proof of B1** (we display without the BIOS) and the heart
+> of the **B3 screen driver**.
 
 ---
 
-### 0.5 — Lire le binaire avec `hexdump`
+### 0.5 — Reading the binary with `hexdump`
 
-Le secteur final, octet par octet — un excellent réflexe de débogage bas niveau.
+The final sector, byte by byte — an excellent low-level debugging reflex.
 
-> **`xxd build/boot.bin`** — affiche les 512 octets en hexadécimal + ASCII.
+> **`xxd build/boot.bin`** — displays the 512 bytes in hexadecimal + ASCII.
 
 ```bash
 make
 xxd build/boot.bin
 ```
 
-Extrait (le tien peut différer d'un ou deux octets selon la longueur du code) :
+Excerpt (yours may differ by a byte or two depending on the code length):
 
 ```
 00000000: fa31 c08e d88e c08e d0bc 007c fbbe 207c  .1.........|.. |
@@ -440,74 +440,127 @@ Extrait (le tien peut différer d'un ou deux octets selon la longueur du code) :
 000001f0: 0000 0000 0000 0000 0000 0000 0000 55aa  ..............U.
 ```
 
-On y lit **les 4 blocs** : code (`0x00`–`0x1F`), chaîne (`0x20`–`0x33`), padding (zéros),
+There you can read **the 4 blocks**: code (`0x00`–`0x1F`), string (`0x20`–`0x33`), padding (zeros),
 signature `55aa` (offset `0x1FE`).
 
-**Le code, c'est aussi des octets.** Décodage des premiers :
+**Code is also bytes.** Decoding the first ones:
 
-| Octets | Instruction |
+| Bytes | Instruction |
 |---|---|
 | `fa` | `cli` |
 | `31 c0` | `xor ax, ax` |
 | `8e d8` / `8e c0` / `8e d0` | `mov ds/es/ss, ax` |
 | `bc 00 7c` | `mov sp, 0x7C00` |
 | `fb` | `sti` |
-| **`be 20 7c`** | **`mov si, 0x7C20`** ← l'adresse de `msg` |
+| **`be 20 7c`** | **`mov si, 0x7C20`** ← the address of `msg` |
 | `ac` | `lodsb` |
 | `84 c0` / `74 08` | `test al,al` / `jz` |
 | `b4 0e` / `b7 00` / `cd 10` | `mov ah,0x0E` / `mov bh,0x00` / `int 0x10` |
-| `eb f3` | `jmp .print` (saut **relatif** : recule de 13) |
+| `eb f3` | `jmp .print` (**relative** jump: goes back 13) |
 | `f4` / `eb fd` | `hlt` / `jmp .hang` |
 
-> **Le label est devenu une adresse.** `mov si, msg` s'est encodé `be 20 7c` = `mov si,
-> 0x7C20`. NASM a calculé `msg` = `0x7C00 + 0x20` (grâce à `org`) et l'a gravé **en dur**.
-> Aucune trace du mot « msg » ni « .print » : le binaire ne contient que des nombres.
+> **The label became an address.** `mov si, msg` was encoded as `be 20 7c` = `mov si,
+> 0x7C20`. NASM computed `msg` = `0x7C00 + 0x20` (thanks to `org`) and burned it **hardcoded**.
+> No trace of the word "msg" nor ".print": the binary contains only numbers.
 
-> **La chaîne est devenue des octets ASCII.** À l'offset `0x20` : `6e 61 6f 73` = 'n' 'a' 'o'
-> 's'. Le `db "naos..."` du source n'est qu'une écriture lisible de ces codes.
+> **The string became ASCII bytes.** At offset `0x20`: `6e 61 6f 73` = 'n' 'a' 'o'
+> 's'. The `db "naos..."` of the source is just a readable way of writing these codes.
 
 ---
 
-### 0.6 — Vérifier dans QEMU
+### 0.6 — Verify in QEMU
 
-#### À l'œil (fenêtre)
+#### By eye (window)
 
 ```bash
 make run-b0
 ```
 
-SeaBIOS → `Booting from Hard Disk...` → `naos B0: it boots!` → curseur figé (le CPU est en
-`hlt`). **Critère de réussite : le message s'affiche et la machine ne redémarre pas en
-boucle** (un reboot en boucle = triple-fault). C'est la vérif normale.
+SeaBIOS → `Booting from Hard Disk...` → `naos B0: it boots!` → frozen cursor (the CPU is in
+`hlt`). **Success criterion: the message is displayed and the machine doesn't reboot in a
+loop** (a reboot loop = triple fault). This is the normal check.
 
-#### Capture headless (quand on n'a pas de fenêtre)
+#### Headless capture (when there's no window)
 
-Parfois on veut juste une image de l'écran — par exemple pour vérifier à distance, ou en
-script. On lance QEMU **headless** avec un socket QMP (le protocole de contrôle de QEMU), puis
-on capture depuis un autre terminal :
+Sometimes we just want an image of the screen — for example to verify remotely, or in a
+script. We launch QEMU **headless** with a QMP socket (QEMU's control protocol), then
+capture from another terminal:
 
 ```bash
-make run-b0 QMP=1               # terminal 1 : QEMU sans fenêtre + socket QMP
-python3 tools/qemu-shot.py      # terminal 2 : écrit build/shot.png
+make run-b0 QMP=1               # terminal 1: QEMU without a window + QMP socket
+python3 tools/qemu-shot.py      # terminal 2: writes build/shot.png
 ```
 
-Ouvre `build/shot.png` et juge toi-même : pas de PASS/FAIL, pas d'OCR — juste la photo.
+Open `build/shot.png` and judge for yourself: no PASS/FAIL, no OCR — just the photo.
 
-> **Pourquoi un script plutôt qu'un `screendump` + `sleep` ?** Le boot est quasi instantané en
-> temps *guest*, mais QMP répond avant que SeaBIOS ait fini en temps *réel* : capturer trop tôt
-> donne « display not initialized ». Le script **attend que l'écran se stabilise** (deux
-> captures de taille proche d'affilée) au lieu de parier sur un délai fixe. Et comme le curseur
-> `_` du mode texte **clignote pour toujours**, il compare la *taille* des PNG (clignotement
-> ≈ 0,5 %, toléré) et non les octets exacts, jamais identiques. Voir `tools/qemu-shot.py`.
+> **Why a script rather than a `screendump` + `sleep`?** The boot is near-instantaneous in
+> *guest* time, but QMP responds before SeaBIOS has finished in *real* time: capturing too early
+> gives "display not initialized". The script **waits for the screen to stabilize** (two
+> captures of similar size in a row) instead of betting on a fixed delay. And since the text-mode
+> cursor `_` **blinks forever**, it compares the *size* of the PNGs (blinking
+> ≈ 0.5%, tolerated) rather than the exact bytes, which are never identical. See `tools/qemu-shot.py`.
 
 ---
 
-### Pour aller plus loin → B1
+### 0.7 — On ARM (AArch64): the same brick, a different world
 
-- B0 **emprunte** le firmware (`int 0x10`). **B1** va jusqu'au bout du démarrage real mode —
-  activation **A20**, **GDT**, bit **PE** de `CR0`, **far jump** — pour entrer en **mode
-  protégé 32 bits**. Là, `int 0x10` disparaît : on affichera en écrivant directement dans
+x86 is not the only architecture — ARM (phones, Raspberry Pi, Apple Silicon, AWS Graviton) is
+a *different* instruction set, and QEMU emulates it too (`qemu-system-aarch64`). **B0 is the one
+Part that transposes cleanly to ARM**, precisely because it touches none of the x86 folklore
+(real mode, A20, GDT — that's B1, which has *no* ARM equivalent). The contrast is the lesson:
+
+| | B0 x86 (`boot.asm.b0`) | B0 ARM (`boot/arm/`) |
+|---|---|---|
+| Assembler | **NASM** (Intel syntax) | **GNU `as`** (ARM syntax) |
+| Format | flat binary, 512 bytes | **ELF**, loaded by QEMU `-kernel` |
+| Startup | BIOS → `0x7C00`, 16-bit real mode | **directly in 64-bit** at an *exception level*, **no BIOS, no boot sector** |
+| QEMU | `qemu-system-i386 -drive…` | `qemu-system-aarch64 -machine virt -kernel…` |
+| Display | VGA video memory `0xB8000` | **PL011 UART** (`0x09000000`, a memory-mapped serial port) |
+| Verify | screenshot (`qemu-shot.py`) | **read the serial output** (text on stdout) |
+
+#### Prerequisites (Debian/Ubuntu)
+
+```bash
+sudo apt install -y qemu-system-arm gcc-aarch64-linux-gnu
+```
+
+Unlike x86, **no 40-minute build**: the AArch64 cross-compiler and QEMU-ARM are ready-made
+packages.
+
+#### The three files
+
+- **`boot/arm/boot.S`** — AArch64 boot stub: set the stack pointer, `bl kmain`. No mode switch —
+  QEMU `virt` already starts the CPU in 64-bit.
+- **`kernel/arm/kmain.c`** — writes the string into the PL011 UART data register at `0x09000000`
+  (there is no VGA on `virt`).
+- **`boot/arm/linker.ld`** — `virt` RAM starts at `0x40000000`; we link the kernel at `0x40080000`.
+
+#### Build & verify
+
+```bash
+make run-b0-arm     # QEMU 'virt', serial console on the terminal (Ctrl-A then X to quit)
+```
+
+Expected: `naos B0 (ARM): it boots!` on the serial console.
+
+> **Why no screenshot here?** The `virt` machine has no VGA framebuffer. Text goes out on the
+> **serial UART**, so the "screen" is a text stream, not pixels — you read it (e.g. with
+> `-serial file:out.log`), you don't capture it. That's the x86/ARM contrast made concrete:
+> legacy VGA text memory on one side, a memory-mapped UART on the other.
+
+> **Key point — only B0 maps cleanly.** From B1 on, the x86 path is deeply x86-specific (real
+> mode, A20, GDT and the far jump have *no* ARM counterpart; ARM boots straight into 64-bit at an
+> exception level). The universal *concepts* (privilege levels, MMU/paging, interrupt controller)
+> still exist on ARM, but under other names (EL0–EL3, translation tables, GIC) and with entirely
+> different code. So naos stays x86; this ARM B0 is a one-off eye-opener.
+
+---
+
+### Going further → B1
+
+- B0 **borrows** the firmware (`int 0x10`). **B1** goes all the way through the real-mode
+  startup — **A20** activation, **GDT**, the **PE** bit of `CR0`, **far jump** — to enter
+  **32-bit protected mode**. There, `int 0x10` disappears: we'll display by writing directly to
   `0xB8000`.
-- L'affichage direct `0xB8000` et le **remplacement de la police CP437** : ce sera le **driver
-  écran (B3)**.
-
+- The direct `0xB8000` display and the **replacement of the CP437 font**: that will be the **screen
+  driver (B3)**.
