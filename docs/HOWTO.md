@@ -16,6 +16,7 @@ under [`howto/`](howto/) (easier to read and maintain):
 | 1 | B1 — real mode → 32-bit protected mode | [howto/01-protected-mode.md](howto/01-protected-mode.md) |
 | 2 | B2 — GRUB + Multiboot + first C kernel | [howto/02-multiboot.md](howto/02-multiboot.md) |
 | 3 | B3 — VGA text driver | [howto/03-vga.md](howto/03-vga.md) |
+| 4 | B4 — kernel-owned GDT | [howto/04-gdt.md](howto/04-gdt.md) |
 | — | Appendices A (x86 asm) · B (`boot.asm` line by line) · C (`int 0x10`) | [howto/annexes.md](howto/annexes.md) |
 
 On this page: [Goal](#goal) · [Prerequisites](#prerequisites) ·
@@ -78,7 +79,7 @@ concepts and criteria.
 | [1](howto/01-protected-mode.md) | B1 — Home-made boot sector (real mode → protected mode) | ✅ done |
 | [2](howto/02-multiboot.md) | B2 — GRUB/Multiboot + C kernel | ✅ done |
 | [3](howto/03-vga.md) | B3 — VGA screen driver | ✅ done |
-| 4  | B4 — Proper GDT (kernel) | planned |
+| [4](howto/04-gdt.md) | B4 — Proper GDT (kernel) | ✅ done |
 | 5  | B5 — IDT + interrupts | planned |
 | 6  | B6 — Keyboard + timer | planned |
 | 7  | B7 — Physical memory | planned |
