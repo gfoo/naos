@@ -31,7 +31,7 @@ B3_OBJS := $(BUILD)/boot.o $(BUILD)/kmain.o $(BUILD)/vga.o
 # Dernière brique (cible de `make run-kernel` / `make debug` / `make` par défaut).
 LAST := b3
 
-.PHONY: all run-b0 run-b1 run-b2 run-b3 run-kernel debug clean distclean
+.PHONY: all run-b0 run-b1 run-b2 run-b3 run-b0-arm run-kernel debug clean distclean
 
 # Socket QMP : ouvert par `make run-bN QMP=1` pour capturer l'écran (tools/qemu-shot.py).
 # (bloc ifdef et pas $(if …) : $(if) couperait sur les virgules de `,server,nowait`)
@@ -97,6 +97,32 @@ run-b2: $(BUILD)/b2.iso
 run-b3: $(BUILD)/b3.iso
 	@$(if $(QMP),rm -f $(QMP_SOCK))
 	$(QEMU) -cdrom $< $(QEMU_OPTS)
+
+# --- B0 sur ARM (AArch64) -----------------------------------------------------
+# Pendant de la Partie 0 sur ARM (cf. docs/howto/00-setup.md §0.7). Pipeline
+# totalement distinct du x86 : cross-compiler aarch64, ELF chargé par QEMU
+# 'virt' (-kernel, pas de BIOS/boot sector), sortie sur l'UART série (pas de VGA).
+ARM_CC     ?= aarch64-linux-gnu-gcc
+ARM_QEMU   ?= qemu-system-aarch64
+ARM_CFLAGS := -ffreestanding -nostdlib -mgeneral-regs-only -O2 -Wall -Wextra
+ARM_ELF    := $(BUILD)/arm/naos-arm.elf
+
+$(BUILD)/arm:
+	mkdir -p $(BUILD)/arm
+
+$(BUILD)/arm/boot.o: boot/arm/boot.S | $(BUILD)/arm
+	$(ARM_CC) $(ARM_CFLAGS) -c $< -o $@
+
+$(BUILD)/arm/kmain.o: kernel/arm/kmain.c | $(BUILD)/arm
+	$(ARM_CC) $(ARM_CFLAGS) -c $< -o $@
+
+$(ARM_ELF): $(BUILD)/arm/boot.o $(BUILD)/arm/kmain.o boot/arm/linker.ld
+	$(ARM_CC) $(ARM_CFLAGS) -Wl,--no-warn-rwx-segments \
+	  -T boot/arm/linker.ld -o $@ $(BUILD)/arm/boot.o $(BUILD)/arm/kmain.o -lgcc
+
+# Boot ARM : QEMU 'virt', console série sur le terminal. Quitter : Ctrl-A puis X.
+run-b0-arm: $(ARM_ELF)
+	$(ARM_QEMU) -machine virt -cpu cortex-a53 -nographic -kernel $(ARM_ELF)
 
 # Itération rapide : QEMU charge le dernier kernel SANS GRUB (loader -kernel).
 run-kernel: $(BUILD)/$(LAST).kernel
