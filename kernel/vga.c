@@ -59,3 +59,13 @@ void vga_write(const char *s)
     while (*s)
         vga_putchar(*s++);
 }
+
+/* Write s at a fixed (row, col) with the current color, WITHOUT moving the
+ * logical cursor. Used for status text (e.g. the B6 timer counter) that must not
+ * interfere with the normal output flow. */
+void vga_write_at(size_t row, size_t col, const char *s)
+{
+    size_t i = row * COLS + col;
+    while (*s && i < ROWS * COLS)
+        VGA_MEM[i++] = cell(*s++, color);
+}

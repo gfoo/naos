@@ -19,5 +19,6 @@ void vga_init(void);                                   /* clears the screen, cur
 void vga_set_color(enum vga_color fg, enum vga_color bg);
 void vga_putchar(char c);                              /* handles \n \r \t \b + scroll */
 void vga_write(const char *s);                         /* writes a C string */
+void vga_write_at(size_t row, size_t col, const char *s);  /* write at (row,col), cursor unchanged */
 
 #endif /* NAOS_VGA_H */
