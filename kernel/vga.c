@@ -1,4 +1,4 @@
-/* naos — B3 : driver écran VGA mode texte. Voir include/vga.h et docs/HOWTO.md §3. */
+/* naos — B3 : driver écran VGA mode texte. Voir include/vga.h et docs/howto/03-vga.md. */
 #include "vga.h"
 
 #define VGA_MEM  ((volatile uint16_t *)0xB8000)

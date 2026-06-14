@@ -9,7 +9,7 @@
 ;   2. une PILE (la spec Multiboot ne garantit pas d'esp utilisable) ;
 ;   3. le point d'entrée _start, qui appelle kmain() (notre code C).
 ;
-; Assemblé en ELF32 (-f elf32), lié par linker.ld. Voir docs/HOWTO.md §2.
+; Assemblé en ELF32 (-f elf32), lié par linker.ld. Voir docs/howto/02-multiboot.md.
 
 bits 32
 

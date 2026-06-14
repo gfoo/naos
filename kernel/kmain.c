@@ -1,7 +1,7 @@
 /* naos — point d'entrée C du kernel.
  *  B2 : prouver que kmain() s'exécute (chargé par GRUB via Multiboot).
  *  B3 : utiliser le driver VGA (texte formaté + couleurs + défilement).
- * Appelé par boot/boot.asm (_start). Voir docs/HOWTO.md §2 et §3. */
+ * Appelé par boot/boot.asm (_start). Voir docs/howto/02-multiboot.md et 03-vga.md. */
 #include "vga.h"
 
 /* mini-itoa pour entiers >= 0 (suffisant pour la démo de scroll). */

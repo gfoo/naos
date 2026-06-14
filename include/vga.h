@@ -1,6 +1,6 @@
 /* naos — B3 : driver écran VGA mode texte (buffer 0xB8000, 80x25).
  * Chaque cellule = 2 octets : caractère (CP437) + attribut couleur (4 bits fond,
- * 4 bits avant-plan). Voir docs/HOWTO.md §3. */
+ * 4 bits avant-plan). Voir docs/howto/03-vga.md. */
 #ifndef NAOS_VGA_H
 #define NAOS_VGA_H
 
