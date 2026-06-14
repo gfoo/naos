@@ -21,7 +21,7 @@ ISO     := $(BUILD)/naos.iso
 CFLAGS  := -std=gnu11 -ffreestanding -O2 -Wall -Wextra -Iinclude
 LDFLAGS := -ffreestanding -O2 -nostdlib -lgcc
 
-OBJS := $(BUILD)/boot.o $(BUILD)/kmain.o
+OBJS := $(BUILD)/boot.o $(BUILD)/kmain.o $(BUILD)/vga.o
 
 .PHONY: all run run-kernel debug clean distclean
 

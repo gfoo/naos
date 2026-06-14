@@ -18,6 +18,9 @@
   - [0.4 — L'affichage en profondeur](#04--laffichage-en-profondeur)
   - [0.5 — Lire le binaire avec `hexdump`](#05--lire-le-binaire-avec-hexdump)
   - [0.6 — Vérifier dans QEMU](#06--vérifier-dans-qemu)
+- [Partie 1 — B1 : du real mode au mode protégé 32 bits](#partie-1--b1--du-real-mode-au-mode-protégé-32-bits)
+- [Partie 2 — B2 : GRUB + Multiboot + premier kernel C](#partie-2--b2--grub--multiboot--premier-kernel-c)
+- [Partie 3 — B3 : driver écran VGA](#partie-3--b3--driver-écran-vga)
 - [Annexes](#annexes)
   - [Annexe A — Rappels d'assembleur x86](#annexe-a--rappels-dassembleur-x86-real-mode-16-bits)
   - [Annexe B — `boot.asm` ligne par ligne](#annexe-b--bootbootasm-ligne-par-ligne)
@@ -560,7 +563,7 @@ signature `55aa` (offset `0x1FE`).
 
 ### 0.6 — Vérifier dans QEMU
 
-**À la main (fenêtre) :**
+#### À l'œil (fenêtre)
 
 ```bash
 make run
@@ -568,42 +571,27 @@ make run
 
 SeaBIOS → `Booting from Hard Disk...` → `naos B0: it boots!` → curseur figé (le CPU est en
 `hlt`). **Critère de réussite : le message s'affiche et la machine ne redémarre pas en
-boucle** (un reboot en boucle = triple-fault).
+boucle** (un reboot en boucle = triple-fault). C'est la vérif normale.
 
-**Sans tête (automatisable, réutilisable à chaque brique) :** on lance QEMU headless, on
-capture l'écran par QMP, et on détecte les triple-faults.
+#### Capture headless (quand on n'a pas de fenêtre)
+
+Parfois on veut juste une image de l'écran — par exemple pour vérifier à distance, ou en
+script. On lance QEMU **headless** avec un socket QMP (le protocole de contrôle de QEMU), puis
+on capture depuis un autre terminal :
 
 ```bash
-rm -f build/qemu.log build/shot.png /tmp/naos-qmp.sock
-qemu-system-i386 -drive format=raw,file=build/naos.img -display none -no-reboot \
-  -qmp unix:/tmp/naos-qmp.sock,server,nowait -d int,cpu_reset -D build/qemu.log &
-QPID=$!
-python3 - <<'PY'
-import socket, json, time
-for _ in range(200):
-    try:
-        s = socket.socket(socket.AF_UNIX); s.connect("/tmp/naos-qmp.sock"); break
-    except OSError: time.sleep(0.02)
-def line():
-    b=b""
-    while b"\n" not in b: b += s.recv(4096)
-    return b
-line()                                                   # message d'accueil QMP
-def cmd(d): s.sendall((json.dumps(d)+"\n").encode()); return line()
-cmd({"execute":"qmp_capabilities"})
-time.sleep(2.5)                                          # laisser SeaBIOS booter (temps réel)
-cmd({"execute":"screendump","arguments":{"filename":"build/shot.png","format":"png"}})
-PY
-kill $QPID 2>/dev/null
-grep -iE "triple|shutdown" build/qemu.log && echo "PLANTAGE" || echo "OK : pas de triple-fault"
+make run QMP=1                  # terminal 1 : QEMU sans fenêtre + socket QMP
+python3 tools/qemu-shot.py      # terminal 2 : écrit build/shot.png
 ```
 
-Ouvre ensuite `build/shot.png` : tu dois y voir `naos B0: it boots!`.
+Ouvre `build/shot.png` et juge toi-même : pas de PASS/FAIL, pas d'OCR — juste la photo.
 
-> **Pourquoi le `time.sleep(2.5)` ?** Le boot est quasi instantané en temps *guest*, mais
-> QMP répond bien avant que SeaBIOS ait fini en temps *réel*. Capturer trop tôt donne une
-> image « Guest has not initialized the display (yet) ». On laisse la machine vivre quelques
-> secondes avant la photo.
+> **Pourquoi un script plutôt qu'un `screendump` + `sleep` ?** Le boot est quasi instantané en
+> temps *guest*, mais QMP répond avant que SeaBIOS ait fini en temps *réel* : capturer trop tôt
+> donne « display not initialized ». Le script **attend que l'écran se stabilise** (deux
+> captures de taille proche d'affilée) au lieu de parier sur un délai fixe. Et comme le curseur
+> `_` du mode texte **clignote pour toujours**, il compare la *taille* des PNG (clignotement
+> ≈ 0,5 %, toléré) et non les octets exacts, jamais identiques. Voir `tools/qemu-shot.py`.
 
 ---
 
@@ -615,6 +603,131 @@ Ouvre ensuite `build/shot.png` : tu dois y voir `naos B0: it boots!`.
   `0xB8000`.
 - L'affichage direct `0xB8000` et le **remplacement de la police CP437** : ce sera le **driver
   écran (B3)**.
+
+## Partie 1 — B1 : du real mode au mode protégé 32 bits
+
+> Source : `boot/boot.asm.b1` (le boot sector B1 est conservé sous ce nom — à partir
+> de B2, `boot/boot.asm` devient l'en-tête Multiboot). Build/run : `make` puis `make run`
+> **depuis le commit B1** (ou en pointant NASM sur `boot.asm.b1`).
+
+### 1.1 — L'objectif
+
+B0 empruntait le firmware (`int 0x10`). B1 fait les **quatre gestes** qui font passer le CPU
+du *real mode* 16 bits (où le BIOS nous dépose) au *mode protégé* 32 bits — l'environnement où
+tournera tout le reste de l'OS :
+
+1. **A20** — la ligne d'adresse A20, désactivée à l'allumage pour compatibilité avec le
+   8086, tronque les adresses au-delà de 1 Mo. On l'active (sinon `0x100000` replierait sur 0).
+2. **GDT** — en mode protégé, `CS`/`DS`/… ne sont plus des adresses (real mode : `segment*16 +
+   offset`) mais des **sélecteurs** qui indexent une table de descripteurs, la *GDT*. On en
+   charge une « plate » (base 0, limite 4 Go) : on neutralise la segmentation.
+3. **bit PE de `CR0`** — Protection Enable. Le mettre fait *basculer* le CPU en mode protégé.
+4. **far jump** — un saut lointain `jmp SELECTEUR:offset` recharge `CS` avec le sélecteur de
+   code et vide le pipeline de pré-chargement : la première instruction *vraiment* 32 bits.
+
+### 1.2 — La preuve observable
+
+Un message en real mode (via `int 0x10`), puis — une fois en 32 bits où **`int 0x10` n'existe
+plus** — un message écrit **directement** dans la mémoire vidéo VGA (`0xB8000`, 2 octets par
+cellule : caractère + attribut couleur). Si le second message s'affiche, c'est que du code
+32 bits s'est exécuté : la bascule a réussi.
+
+### 1.3 — Points délicats
+
+- `cli` **avant** la bascule : en mode protégé on n'a pas encore d'IDT ; une interruption
+  partirait dans le décor (triple-fault). On reste interruptions coupées jusqu'à B5.
+- La **GDT plate** : descripteur nul obligatoire (sélecteur `0x00`), puis code (`0x08`) et
+  data (`0x10`). Flags `G=1` (limite en pages → 4 Go) et `D=1` (opérandes 32 bits).
+- A20 : méthode « Fast A20 » (port `0x92`, bit 1) — la plus simple ; suffit sous QEMU.
+
+### 1.4 — Vérification
+
+```bash
+make run                      # à l'œil : message real mode, puis message vert en 32 bits
+make run QMP=1                # (autre terminal) python3 tools/qemu-shot.py
+```
+
+Le message « 32-bit protected mode! » apparaît **en haut à gauche** : on a écrit à `0xB8000`
+= début exact de la mémoire vidéo (ligne 0). Critère B1 atteint.
+
+---
+
+## Partie 2 — B2 : GRUB + Multiboot + premier kernel C
+
+> Fichiers : `boot/boot.asm` (en-tête Multiboot + stub), `kernel/kmain.c`, `linker.ld`,
+> `grub/grub.cfg`, `Makefile`. Toolchain : `i686-elf-gcc` (cf. `toolchain/build-i686-elf.sh`).
+
+### 2.1 — Pourquoi déléguer à GRUB
+
+B1 a *montré* comment entrer en mode protégé. À partir d'ici, on **délègue** ce démarrage à
+GRUB via la spec **Multiboot 1** (choix hybride C4 : comprendre d'abord, déléguer ensuite).
+GRUB nous livre déjà en mode protégé 32 bits, A20 et GDT faits, kernel chargé à **1 Mo**. On
+se concentre désormais sur le kernel, en **C**.
+
+### 2.2 — Les trois pièces
+
+- **En-tête Multiboot** (`boot/boot.asm`, section `.multiboot`) : trois `dd` — magic
+  `0x1BADB002`, flags, checksum (la somme des trois doit faire 0). GRUB le cherche dans les
+  **8 premiers Ko** du binaire → `linker.ld` place `.multiboot` en tête de `.text`.
+- **Stub `_start`** : installe une pile (`esp`), appelle `kmain`, puis `cli`/`hlt`.
+- **`linker.ld`** : `ENTRY(_start)`, base à `1M`, sections alignées sur 4 Ko.
+
+### 2.3 — Le cross-compiler (pourquoi, rappel C5)
+
+Le `gcc` système produit des binaires *Linux* (libc, format hôte). Notre kernel tourne **sans
+OS** : on compile *freestanding* (`-ffreestanding -nostdlib`) avec un toolchain `i686-elf` qui
+ne fait **aucune hypothèse hôte**. On lie avec `i686-elf-gcc` (et non `ld` nu) pour récupérer
+`libgcc` (helpers arithmétiques 64 bits, etc.).
+
+### 2.4 — Build & vérification
+
+```bash
+make                          # compile le kernel, vérifie l'en-tête Multiboot, fabrique l'ISO
+make run                      # QEMU boote l'ISO → GRUB → kmain()  (le vrai chemin B2)
+make run-kernel               # raccourci : QEMU charge le kernel SANS GRUB (-kernel)
+```
+
+`make` valide `grub-file --is-x86-multiboot build/naos.kernel`. Critère B2 : `kmain()`
+s'exécute (preuve : il écrit à l'écran — voir B3).
+
+> **Dépendances** : `i686-elf-gcc` (construit une fois via `toolchain/build-i686-elf.sh`),
+> et pour l'ISO : `grub-pc-bin`, `xorriso`, `mtools`.
+
+---
+
+## Partie 3 — B3 : driver écran VGA
+
+> Fichiers : `include/vga.h`, `kernel/vga.c`, `kernel/kmain.c`.
+
+### 3.1 — Le buffer texte VGA
+
+À `0xB8000` : 80×25 cellules de **2 octets** — octet bas = caractère (CP437), octet haut =
+**attribut** (4 bits avant-plan, 4 bits fond). Écrire un caractère coloré = poser un `uint16_t`
+à la bonne cellule. Pas de BIOS : on est en C freestanding, on tape la mémoire directement.
+
+### 3.2 — Ce que fait le driver
+
+- `vga_init()` — efface l'écran, curseur en (0,0) ;
+- `vga_set_color(fg, bg)` — change l'attribut courant ;
+- `vga_putchar(c)` — pose un caractère, gère `\n \r \t \b`, avance le curseur, **défile**
+  (scroll) quand on dépasse la 25ᵉ ligne (recopie lignes 1..24 → 0..23, vide la dernière) ;
+- `vga_write(s)` — boucle sur une chaîne C.
+
+### 3.3 — Vérification
+
+```bash
+make run                      # ou make run-kernel
+make run QMP=1                # (autre terminal) python3 tools/qemu-shot.py
+```
+
+`kmain` imprime un en-tête coloré puis 30 lignes numérotées : comme l'écran fait 25 lignes,
+les premières **défilent** hors champ. Critère B3 : texte formaté + défilement visibles.
+
+> **Suite (B3+) — la police.** Remplacer la police CP437 de la ROM par la nôtre (cf.
+> `tools/vgafont.py`, `assets/fonts/ibm_vga_8x16.bin`) se fait en écrivant dans le générateur
+> de caractères VGA — étape ultérieure du driver.
+
+---
 
 ## Annexes
 

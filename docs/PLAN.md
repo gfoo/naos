@@ -56,9 +56,9 @@ Chaque brique : théorie → code → vérification observable dans QEMU.
 | ID | Brique | Concept appris | Critère de réussite | Statut |
 |----|--------|----------------|---------------------|--------|
 | B0 | Setup & "It boots" | Toolchain, Makefile, structure | QEMU démarre sans planter | ✅ |
-| B1 | Boot sector maison | Real mode, `0x7C00`, `0xAA55`, `int 0x10`, GDT, mode protégé | Message real mode → bascule 32-bit | ❌ |
-| B2 | GRUB/Multiboot + kernel C | Header Multiboot, stub ASM→C, linker script, chargement 1 Mo | `kmain()` s'exécute via GRUB | ❌ |
-| B3 | Driver écran VGA | Buffer `0xB8000`, couleurs, scroll, `printf`-like | Texte formaté + défilement | ❌ |
+| B1 | Boot sector maison | Real mode, `0x7C00`, `0xAA55`, `int 0x10`, GDT, mode protégé | Message real mode → bascule 32-bit | ✅ |
+| B2 | GRUB/Multiboot + kernel C | Header Multiboot, stub ASM→C, linker script, chargement 1 Mo | `kmain()` s'exécute via GRUB | ✅ |
+| B3 | Driver écran VGA | Buffer `0xB8000`, couleurs, scroll, `printf`-like | Texte formaté + défilement | ✅ |
 | B4 | GDT propre (kernel) | Segmentation, descripteurs | GDT rechargée, pas de triple-fault | ❌ |
 | B5 | IDT + interruptions | IDT, PIC, exceptions CPU (ISR/IRQ) | Division par zéro → handler | ❌ |
 | B6 | Clavier + timer | IRQ matérielles, ports I/O (`inb`/`outb`), PS/2, PIT | Saisie clavier affichée + tics timer | ❌ |
