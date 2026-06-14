@@ -19,8 +19,32 @@
   - [0.5 — Lire le binaire avec `hexdump`](#05--lire-le-binaire-avec-hexdump)
   - [0.6 — Vérifier dans QEMU](#06--vérifier-dans-qemu)
 - [Partie 1 — B1 : du real mode au mode protégé 32 bits](#partie-1--b1--du-real-mode-au-mode-protégé-32-bits)
+  - [1.1 — Real mode vs mode protégé](#11--real-mode-vs-mode-protégé--ce-qui-change-vraiment)
+  - [1.2 — Vue d'ensemble : les quatre gestes](#12--vue-densemble--les-quatre-gestes)
+  - [1.3 — A20 : la ligne d'adresse oubliée](#13--a20--la-ligne-dadresse-oubliée)
+  - [1.4 — La GDT : segments, sélecteurs, descripteurs](#14--la-gdt--segments-sélecteurs-descripteurs)
+  - [1.5 — La bascule : `CR0.PE` + far jump](#15--la-bascule--bit-pe-de-cr0--far-jump)
+  - [1.6 — Afficher sans le BIOS : `0xB8000`](#16--afficher-sans-le-bios--écrire-dans-0xb8000)
+  - [1.7 — Le boot sector complet, pas à pas](#17--le-boot-sector-complet-construit-pas-à-pas)
+  - [1.8 — Vérifier dans QEMU](#18--vérifier-dans-qemu)
 - [Partie 2 — B2 : GRUB + Multiboot + premier kernel C](#partie-2--b2--grub--multiboot--premier-kernel-c)
+  - [2.1 — Pourquoi déléguer le boot à GRUB](#21--pourquoi-déléguer-le-boot-à-grub)
+  - [2.2 — La spec Multiboot](#22--la-spec-multiboot--le-contrat-entre-grub-et-notre-kernel)
+  - [2.3 — Le cross-compiler](#23--le-cross-compiler--pourquoi-et-comment-le-construire)
+  - [2.4 — Le stub d'amorçage en ASM](#24--le-stub-damorçage-en-asm-bootbootasm)
+  - [2.5 — Le linker script : kernel à 1 Mo](#25--le-linker-script--placer-le-kernel-à-1-mo)
+  - [2.6 — Le premier `kmain()` en C](#26--le-premier-kmain-en-c)
+  - [2.7 — Fabriquer l'ISO bootable (GRUB)](#27--fabriquer-liso-bootable-grub)
+  - [2.8 — Build & vérifier](#28--build--vérifier)
 - [Partie 3 — B3 : driver écran VGA](#partie-3--b3--driver-écran-vga)
+  - [3.1 — Le buffer texte VGA](#31--le-buffer-texte-vga-en-détail)
+  - [3.2 — L'octet d'attribut : les couleurs](#32--loctet-dattribut--encoder-les-couleurs)
+  - [3.3 — L'API et l'état du driver](#33--lapi-et-létat-du-driver)
+  - [3.4 — Effacer l'écran : `vga_init`](#34--effacer-lécran--vga_init)
+  - [3.5 — `vga_putchar` : contrôle, curseur, retour à la ligne](#35--vga_putchar--caractères-de-contrôle-curseur-retour-à-la-ligne)
+  - [3.6 — Le défilement (scroll)](#36--le-défilement-scroll)
+  - [3.7 — La démo dans `kmain`](#37--la-démo-dans-kmain)
+  - [3.8 — Vérifier](#38--vérifier)
 - [Annexes](#annexes)
   - [Annexe A — Rappels d'assembleur x86](#annexe-a--rappels-dassembleur-x86-real-mode-16-bits)
   - [Annexe B — `boot.asm` ligne par ligne](#annexe-b--bootbootasm-ligne-par-ligne)
@@ -659,6 +683,15 @@ historique ~1 Mo). On y a fait B0. Le *mode protégé* est l'autre monde :
 | Services BIOS (`int 0x10`…) | **disponibles** | **disparus** (le BIOS est du code 16 bits) |
 | Protection | aucune | niveaux de privilège (ring 0–3), limites de segment |
 
+> **Pourquoi ne pas rester en 16 bits et partir directement vers le kernel ?** On *peut*
+> sauter vers du code depuis le real mode — B0 le fait. Mais ce code serait alors **lui-même
+> 16 bits**, enfermé sous ~1 Mo, sans protection ni pagination. Et surtout : notre kernel est
+> compilé par `i686-elf-gcc` en **code machine 32 bits**, qui **ne s'exécute pas** en real mode
+> (tailles d'opérandes et adressage différents). Basculer n'est donc pas un luxe, c'est une
+> *condition d'exécution* du kernel. C'est pour ça que **GRUB bascule en mode protégé avant
+> d'appeler `kmain`** (B2) : le saut vers le kernel se fait **déjà en 32 bits**. B1 fait cette
+> bascule à la main pour comprendre ce que GRUB nous épargnera.
+
 > **La conséquence qui surprend.** En basculant, on **perd `int 0x10`** : le BIOS est du code
 > 16 bits, inaccessible en 32 bits. Pour afficher, il faut désormais écrire *soi-même* dans la
 > mémoire vidéo (`0xB8000`, cf. 0.4 et 1.6). C'est précisément ce qui rend la bascule
@@ -704,7 +737,7 @@ on prend la plus simple, **Fast A20** via le port `0x92` :
 > supporte. Les méthodes par contrôleur clavier sont historiquement plus « universelles » mais
 > bien plus longues (attentes de status). Pour un projet pédagogique sous QEMU, `0x92` suffit.
 
-### 1.4 — La GDT : de « segment = adresse » à « segment = sélecteur »
+### 1.4 — La GDT : segments, sélecteurs, descripteurs
 
 C'est le cœur conceptuel de B1. En real mode, `CS = 0x07C0` *signifiait* « base = `0x7C00` ».
 En mode protégé, un registre de segment ne contient plus une adresse mais un **sélecteur** :
@@ -1071,30 +1104,33 @@ menuentry "naos" {
 On assemble une arborescence `boot/grub/` puis on la transforme en ISO avec `grub-mkrescue`
 (prérequis : `grub-pc-bin`, `xorriso`, `mtools`). Le `Makefile` s'en charge :
 
+Le `Makefile` s'en charge via une règle *patron* `build/%.iso` (une ISO par brique kernel :
+`b2.iso`, `b3.iso`…) :
+
 ```make
-$(ISO): $(KERNEL) grub/grub.cfg
-	mkdir -p $(ISO_DIR)/boot/grub
-	cp $(KERNEL) $(ISO_DIR)/boot/naos.kernel
-	cp grub/grub.cfg $(ISO_DIR)/boot/grub/grub.cfg
-	grub-mkrescue -o $(ISO) $(ISO_DIR)
+$(BUILD)/%.iso: $(BUILD)/%.kernel grub/grub.cfg
+	mkdir -p $(BUILD)/iso-$*/boot/grub
+	cp $< $(BUILD)/iso-$*/boot/naos.kernel
+	cp grub/grub.cfg $(BUILD)/iso-$*/boot/grub/grub.cfg
+	grub-mkrescue -o $@ $(BUILD)/iso-$*
 ```
 
 ### 2.8 — Build & vérifier
 
 ```bash
-make                          # compile, VÉRIFIE l'en-tête Multiboot, fabrique l'ISO
-make run                      # QEMU boote l'ISO → GRUB → kmain()   (le vrai chemin B2)
-make run-kernel               # raccourci : QEMU charge le kernel SANS GRUB (loader -kernel)
+make run-b2                   # QEMU boote l'ISO B2 → GRUB → kmain()   (le vrai chemin B2)
+make run-b2 QMP=1             # (autre terminal) python3 tools/qemu-shot.py
+make run-kernel               # raccourci : QEMU charge le DERNIER kernel SANS GRUB (-kernel)
 ```
 
-Le `Makefile` valide automatiquement `grub-file --is-x86-multiboot build/naos.kernel` : si
+Le `Makefile` valide automatiquement `grub-file --is-x86-multiboot build/b2.kernel` : si
 l'en-tête est mal formé, le build échoue *avant* QEMU. Au boot, le message vert prouve que
 `kmain()` (du **C**, chargé par **GRUB**) s'exécute. **Critère B2 atteint.**
 
-> **`make run` vs `make run-kernel`.** Les deux chargent le *même* kernel Multiboot ; seul le
-> loader diffère : GRUB-depuis-l'ISO vs le loader Multiboot intégré de QEMU (`-kernel`). Le
-> critère B2 dit explicitement *via GRUB* → c'est `make run` qui fait foi ; `run-kernel` sert à
-> itérer vite.
+> **ISO (GRUB) vs `-kernel`.** `make run-b2` boote l'ISO → GRUB charge le kernel : c'est le
+> vrai chemin B2. `make run-kernel` charge le *même* kernel via le loader Multiboot intégré de
+> QEMU (sans GRUB) — pratique pour itérer, mais le critère B2 dit *via GRUB*, donc `run-b2`
+> fait foi.
 
 ---
 
@@ -1286,8 +1322,8 @@ décomposant ses chiffres. Un vrai `printf`-like viendra plus tard.
 ### 3.8 — Vérifier
 
 ```bash
-make run                      # ou make run-kernel pour itérer vite
-make run QMP=1                # (autre terminal) python3 tools/qemu-shot.py
+make run-b3                   # (= make run : B3 est la dernière brique) ; run-kernel pour itérer
+make run-b3 QMP=1             # (autre terminal) python3 tools/qemu-shot.py
 ```
 
 Attendu : un en-tête vert/gris, puis des lignes cyan numérotées dont les premières ont
