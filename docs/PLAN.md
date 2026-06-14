@@ -60,22 +60,26 @@ Chaque brique : théorie → code → vérification observable dans QEMU.
 | B2 | GRUB/Multiboot + kernel C | Header Multiboot, stub ASM→C, linker script, chargement 1 Mo | `kmain()` s'exécute via GRUB | ✅ |
 | B3 | Driver écran VGA | Buffer `0xB8000`, couleurs, scroll, `printf`-like | Texte formaté + défilement | ✅ |
 | B4 | GDT propre (kernel) | Segmentation, descripteurs | GDT rechargée, pas de triple-fault | ✅ |
-| B5 | IDT + interruptions | IDT, PIC, exceptions CPU (ISR/IRQ) | Division par zéro → handler | ❌ |
+| B5 | IDT + interruptions | IDT, PIC, exceptions CPU (ISR/IRQ) | Division par zéro → handler | ✅ |
 | B6 | Clavier + timer | IRQ matérielles, ports I/O (`inb`/`outb`), PS/2, PIT | Saisie clavier affichée + tics timer | ❌ |
 | B7 | Mémoire physique | Détection RAM (memmap Multiboot), allocateur de frames | Allouer/libérer une page | ❌ |
 | B8 | Paging (mémoire virtuelle) | Tables de pages, `CR3`, page faults | Adressage virtuel + higher-half | ❌ |
 | B9 | Heap kernel | `kmalloc`/`kfree` | Allocation dynamique fiable | ❌ |
 | B10 | Multitâche | Pile par tâche, context switch, ordonnanceur | Deux tâches alternent à l'écran | ❌ |
-| B11 | Bootloader maison *(optionnel, tardif)* | `int 0x13` (chargement secteurs), `int 0x15` E820 (carte mémoire), binaire plat — **remplacer GRUB** | Kernel boote sans GRUB, carte mémoire détectée maison | ❌ |
-| B12 | Passage en 64-bit *(optionnel, tardif)* | Long mode, paging obligatoire pré-long-mode, GDT 64-bit, toolchain `x86_64-elf` | `kmain()` s'exécute en long mode 64-bit | ❌ |
-
-> **B11/B12 sont des briques de "souveraineté", à faire une fois l'OS fonctionnel** —
-> pas en début de projet (cf. DESIGN-LOG 2026-06-07). B11 ferme la dernière couture tierce
-> de la chaîne de boot (GRUB) ; B12 migre vers x86-64 par cohérence avec l'objectif
-> « tout construire soi-même » (jusqu'à son propre loader UEFI → 64-bit naturel).
+> **B10 sera réalisé en deux versions.** D'abord la version **classique** (ci-dessus :
+> pile par tâche, context switch, ordonnanceur) — elle reste la pierre de Rosette qui
+> donne le vocabulaire (TCB, context switch, run queue). Puis une **réinterprétation LLM**
+> (piste « B100 », par paliers crescendo) : l'ordonnanceur devient un gestionnaire de
+> contexte, les tâches des intentions, le tick timer un message. Voir DESIGN-LOG 2026-06-14
+> « naos comme OS intrinsèquement LLM » pour le raisonnement, le mapping par sous-brique
+> et le crescendo proposé (B100.0 → B100.4).
 
 > Au-delà (planifié plus tard) : appels système, ring 3, système de fichiers, exécution
-> de programmes utilisateur.
+> de programmes utilisateur — réinterprétés eux aussi par la piste LLM le moment venu.
+
+> **Briques de « souveraineté » retirées (2026-06-14)** : les anciens B11 (bootloader
+> maison, remplacer GRUB) et B12 (passage 64-bit) sont abandonnés — orthogonaux à la
+> direction LLM désormais prioritaire pour l'après-B10. Raisonnement dans le DESIGN-LOG.
 
 ## 3. Structure de projet cible
 

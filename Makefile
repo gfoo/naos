@@ -6,6 +6,7 @@
 #   make run-b2   → B2: kmain() in C, loaded by GRUB (writes to 0xB8000)    [kernel/ISO]
 #   make run-b3   → B3: VGA screen driver (colors + scrolling)              [kernel/ISO]
 #   make run-b4   → B4: kernel-owned GDT (null/code/data, ring0+ring3)      [kernel/ISO]
+#   make run-b5   → B5: IDT + CPU-exception handlers (divide-by-zero demo)  [kernel/ISO]
 #   make run-kernel / make debug → latest kernel, without GRUB (QEMU -kernel)
 # (No generic `run` target: we always launch a named brick, no ambiguity.)
 # Two pipelines: flat binary (B0/B1, nasm -f bin, 0x7C00) vs ELF kernel
@@ -29,12 +30,14 @@ LDFLAGS := -ffreestanding -O2 -nostdlib -lgcc
 # kmain is snapshotted per brick (kmain.bN.c); modules (vga, gdt…) are added once.
 B2_OBJS := $(BUILD)/boot.o $(BUILD)/kmain.b2.o
 B3_OBJS := $(BUILD)/boot.o $(BUILD)/kmain.b3.o $(BUILD)/vga.o
-B4_OBJS := $(BUILD)/boot.o $(BUILD)/kmain.o    $(BUILD)/vga.o $(BUILD)/gdt.o $(BUILD)/gdt_flush.o
+B4_OBJS := $(BUILD)/boot.o $(BUILD)/kmain.b4.o $(BUILD)/vga.o $(BUILD)/gdt.o $(BUILD)/gdt_flush.o
+B5_OBJS := $(BUILD)/boot.o $(BUILD)/kmain.o    $(BUILD)/vga.o $(BUILD)/gdt.o $(BUILD)/gdt_flush.o \
+           $(BUILD)/idt.o $(BUILD)/isr.o $(BUILD)/isr_stubs.o
 
 # Latest brick (target of `make run-kernel` / `make debug` / default `make`).
-LAST := b4
+LAST := b5
 
-.PHONY: all run-b0 run-b1 run-b2 run-b3 run-b4 run-b0-arm run-kernel debug clean distclean
+.PHONY: all run-b0 run-b1 run-b2 run-b3 run-b4 run-b5 run-b0-arm run-kernel debug clean distclean
 
 # QMP socket: opened by `make run-bN QMP=1` to capture the screen (tools/qemu-shot.py).
 # (ifdef block and not $(if …): $(if) would cut on the commas of `,server,nowait`)
@@ -77,6 +80,10 @@ $(BUILD)/b4.kernel: $(B4_OBJS) linker.ld
 	$(CC) -T linker.ld -o $@ $(LDFLAGS) $(B4_OBJS)
 	@grub-file --is-x86-multiboot $@ && echo "OK: $@ is Multiboot" || (echo "Multiboot ERROR" && false)
 
+$(BUILD)/b5.kernel: $(B5_OBJS) linker.ld
+	$(CC) -T linker.ld -o $@ $(LDFLAGS) $(B5_OBJS)
+	@grub-file --is-x86-multiboot $@ && echo "OK: $@ is Multiboot" || (echo "Multiboot ERROR" && false)
+
 # --- GRUB bootable ISO (one per kernel brick) --------------------------------
 $(BUILD)/%.iso: $(BUILD)/%.kernel grub/grub.cfg
 	mkdir -p $(BUILD)/iso-$*/boot/grub
@@ -110,6 +117,10 @@ run-b3: $(BUILD)/b3.iso
 	$(QEMU) -cdrom $< $(QEMU_OPTS)
 
 run-b4: $(BUILD)/b4.iso
+	@$(if $(QMP),rm -f $(QMP_SOCK))
+	$(QEMU) -cdrom $< $(QEMU_OPTS)
+
+run-b5: $(BUILD)/b5.iso
 	@$(if $(QMP),rm -f $(QMP_SOCK))
 	$(QEMU) -cdrom $< $(QEMU_OPTS)
 

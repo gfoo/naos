@@ -17,6 +17,7 @@ under [`howto/`](howto/) (easier to read and maintain):
 | 2 | B2 — GRUB + Multiboot + first C kernel | [howto/02-multiboot.md](howto/02-multiboot.md) |
 | 3 | B3 — VGA text driver | [howto/03-vga.md](howto/03-vga.md) |
 | 4 | B4 — kernel-owned GDT | [howto/04-gdt.md](howto/04-gdt.md) |
+| 5 | B5 — IDT + CPU exceptions | [howto/05-idt.md](howto/05-idt.md) |
 | — | Appendices A (x86 asm) · B (`boot.asm` line by line) · C (`int 0x10`) | [howto/annexes.md](howto/annexes.md) |
 
 On this page: [Goal](#goal) · [Prerequisites](#prerequisites) ·
@@ -80,14 +81,12 @@ concepts and criteria.
 | [2](howto/02-multiboot.md) | B2 — GRUB/Multiboot + C kernel | ✅ done |
 | [3](howto/03-vga.md) | B3 — VGA screen driver | ✅ done |
 | [4](howto/04-gdt.md) | B4 — Proper GDT (kernel) | ✅ done |
-| 5  | B5 — IDT + interrupts | planned |
+| [5](howto/05-idt.md) | B5 — IDT + CPU exceptions | ✅ done |
 | 6  | B6 — Keyboard + timer | planned |
 | 7  | B7 — Physical memory | planned |
 | 8  | B8 — Paging (virtual memory) | planned |
 | 9  | B9 — Kernel heap | planned |
 | 10 | B10 — Multitasking | planned |
-| 11 | B11 — Home-made bootloader *(optional, late)* | planned |
-| 12 | B12 — Switch to 64-bit *(optional, late)* | planned |
 
 ---
 
