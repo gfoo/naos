@@ -286,3 +286,69 @@ Double exigence explicite (plus fort que « explicatif » seul) :
 - Conventions conservées : messages de commit conventionnels (`feat(Bx):`, `docs:`…).
 - Reste possible ponctuellement si besoin (ex. expérimentation risquée), mais ce n'est plus
   le défaut.
+
+---
+
+## 2026-06-14 — Identité visuelle de l'écran de boot (prototypée sur GRUB hôte)
+
+> Décisions de *look* pour l'écran de démarrage de naos (B1 affichage real mode, B3 driver
+> écran, B11 bootloader maison), distillées d'un prototype « thème matrix » mené sur le GRUB
+> de la machine hôte (Ubuntu). Le **GRUB hôte n'est qu'un banc d'essai** : ce qui compte ici,
+> c'est l'identité retenue + comment elle se réimplémente *nativement* dans naos.
+
+### Identité retenue
+- **Palette « matrix »** : vert phosphore sur noir. Sélection = vert vif, texte secondaire = vert sombre.
+- **Police** : **IBM VGA 8×16** (look BIOS d'époque, pixels carrés).
+- **Mise en page** : **calée à gauche**, **sans cadre**, façon log terminal/BIOS (pas de boîte centrée).
+- **Texture « rough »** : glyphes volontairement *imparfaits* (scanlines + bruit) → effet CRT usé.
+- **Indicateur d'attente** : **barre de progression** (carrés pleins, le dernier « plus clair »)
+  pilotée par le décompte d'auto-boot. Alternative explorée : spinner `|/-\`.
+
+### Cadeau pour naos : tout ça est quasi-natif en mode texte VGA
+naos en real mode (B1) puis via le buffer texte `0xB8000` (B3) tombe pile sur ces briques :
+- **La police IBM VGA 8×16 est GRATUITE** : c'est la police ROM du VGA, celle qu'`int 0x10` et
+  le mode texte `03h` utilisent par défaut. Le look « BIOS » qu'on a cherché des heures à recréer
+  sur GRUB, naos l'a **par défaut**.
+- **Le vert sur noir = un octet d'attribut.** En mode texte, chaque cellule = `[char][attr]`,
+  `attr = (bg<<4) | fg` :
+
+  | Effet | Attribut | fg |
+  |---|---|---|
+  | Vert vif / noir (sélection) | `0x0A` | 10 = vert clair |
+  | Vert sombre / noir (texte) | `0x02` | 2 = vert |
+
+- **Nuances de vert sans vraie palette** : CP437 fournit des caractères de **trame** →
+  `0xB0` ░, `0xB1` ▒, `0xB2` ▓, `0xDB` █. La barre « carrés pleins + dernier plus clair » se fait
+  *directement* : `█████▓` (pleins + dernier `0xB2`). C'est l'astuce de dithering qu'on a dû
+  bricoler sur GRUB — **native ici**.
+- **Barre / spinner** : trivial, naos dessine lui-même son décompte. Spinner = réécrire `|`,`/`,`-`,`\`
+  sur place ; barre = N blocs `0xDB` + reste en `0xB0`.
+
+### Si naos passe au graphique (VESA real mode / GOP UEFI, ou B11+)
+Plus de police ROM ni d'attributs : on rend des pixels. Leçons du proto GRUB :
+- **Police = bitmap.** Effet « rough » = *cuire* l'imperfection dans les glyphes (mettre des pixels
+  à 0 : 1 ligne sur 3 + ~10 % de bruit). En mode texte on peut même **téléverser une police 8×16
+  custom** dans le générateur de caractères VGA (ports `0x3C4`/`0x3CE`, ou `int 0x10` AX=`1110h`)
+  → effet rough **sans** passer au graphique.
+- **Monochrome ⇒ dithering** pour simuler une 2ᵉ teinte (1 pixel sur 2 = vert « plus clair »).
+- **Vert phosphore en RGB** (si palette dispo) : `#1f9e1f` (sombre), `#33d633` (médian),
+  `#7dff7d` (vif), `#0e7a0e` (atténué) ; fond `#000000`.
+
+### Garde-fous appris (sur GRUB, principe réutilisable)
+- **Taille de police vs résolution** : un glyphe trop grand pour la résolution courante est rejeté
+  (« glyphs too large » → fallback police minuscule). En graphique : **fixer la résolution** et
+  tailler la police pour elle, jamais subir un mode « auto » imprévisible (l'eDP 4K de l'hôte
+  n'exposait que le natif → 48 px y devenait illisible).
+- **Astuce « le décompte EST l'indicateur »** : GRUB ne sait pas animer du texte, mais il redessine
+  `%d` chaque seconde ; en **détournant les glyphes des chiffres** (0-9 → frames de spinner, ou →
+  barres à 10 niveaux) on obtient une animation *gratuite*. naos n'a pas cette contrainte (il anime
+  ce qu'il veut), mais l'idée « mapper une valeur sur un glyphe » reste maligne.
+- **Secure Boot bloque les polices custom de GRUB** (lockdown) — sans objet pour naos (notre loader),
+  mais c'est pourquoi le thème hôte exigeait Secure Boot *off*.
+- **Banc d'essai sans reboot** : prototype validé en bootant GRUB dans **QEMU + OVMF** avec capture
+  QMP — même démarche que la vérif des briques naos (cf. recette QEMU headless).
+
+> **Pourquoi consigner ça** : le jour où on met couleur / police / indicateur de progression dans
+> l'écran de boot de naos, on part de cette identité (vert matrix, IBM 8×16, gauche, barre de blocs)
+> en sachant que **le mode texte VGA la donne presque gratuitement** — inutile de refaire le détour
+> graphique du proto GRUB.
