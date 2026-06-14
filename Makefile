@@ -1,9 +1,15 @@
 # naos — Makefile
 # -----------------------------------------------------------------------------
-# B2/B3 : kernel C (i686-elf) + stub Multiboot, chargé par GRUB depuis une ISO.
-# Cibles : `make` (ISO), `make run` (QEMU/GRUB), `make run-kernel` (QEMU sans
-#          GRUB, via -kernel), `make debug` (GDB), `make clean`.
-# Le boot sector maison de B1 est conservé dans boot/boot.asm.b1 (cf. HOWTO §1).
+# Une cible `run-bN` par brique, pour lancer et comprendre chacune isolément :
+#   make run-b0   → B0 : boot sector minimal (message via int 0x10)        [bin plat]
+#   make run-b1   → B1 : real mode → mode protégé 32 bits                  [bin plat]
+#   make run-b2   → B2 : kmain() en C, chargé par GRUB (écrit à 0xB8000)   [kernel/ISO]
+#   make run-b3   → B3 : driver écran VGA (couleurs + défilement)          [kernel/ISO]
+#   make run      → alias de la DERNIÈRE brique (run-b3)
+#   make run-kernel / make debug → dernier kernel, sans GRUB (QEMU -kernel)
+# Deux pipelines : binaire plat (B0/B1, nasm -f bin, 0x7C00) vs kernel ELF
+# Multiboot chargé par GRUB (B2+). Les briques kernel sont cumulatives :
+# B3 = B2 + driver ; on garde un snapshot du kmain de chaque brique (kmain.bN.c).
 
 # Outils (surchargables : `make QEMU=... CROSS=...`)
 NASM  ?= nasm
@@ -11,21 +17,23 @@ QEMU  ?= qemu-system-i386
 CROSS ?= $(HOME)/opt/cross/bin
 CC    := $(CROSS)/i686-elf-gcc
 
-# Répertoires / artefacts
-BUILD   := build
-ISO_DIR := $(BUILD)/iso
-KERNEL  := $(BUILD)/naos.kernel
-ISO     := $(BUILD)/naos.iso
+# Répertoires
+BUILD := build
 
 # Cross-compilation freestanding : pas de libc, pas d'hypothèse hôte.
 CFLAGS  := -std=gnu11 -ffreestanding -O2 -Wall -Wextra -Iinclude
 LDFLAGS := -ffreestanding -O2 -nostdlib -lgcc
 
-OBJS := $(BUILD)/boot.o $(BUILD)/kmain.o $(BUILD)/vga.o
+# Objets par brique kernel (cumulatif : B3 = B2 + driver vga).
+B2_OBJS := $(BUILD)/boot.o $(BUILD)/kmain.b2.o
+B3_OBJS := $(BUILD)/boot.o $(BUILD)/kmain.o $(BUILD)/vga.o
 
-.PHONY: all run run-kernel run-b0 run-b1 debug clean distclean
+# Dernière brique (cible de `make run-kernel` / `make debug` / `make` par défaut).
+LAST := b3
 
-# Socket QMP : ouvert par `make run QMP=1` pour capturer l'écran (tools/qemu-shot.py).
+.PHONY: all run run-b0 run-b1 run-b2 run-b3 run-kernel debug clean distclean
+
+# Socket QMP : ouvert par `make run-bN QMP=1` pour capturer l'écran (tools/qemu-shot.py).
 # (bloc ifdef et pas $(if …) : $(if) couperait sur les virgules de `,server,nowait`)
 QMP_SOCK  ?= /tmp/naos-qmp.sock
 QEMU_OPTS :=
@@ -33,67 +41,72 @@ ifdef QMP
 QEMU_OPTS := -display none -qmp unix:$(QMP_SOCK),server,nowait
 endif
 
-all: $(ISO)
+all: $(BUILD)/$(LAST).iso
 
 $(BUILD):
 	mkdir -p $(BUILD)
 
+# --- Compilation -------------------------------------------------------------
 # Stub Multiboot : NASM en ELF32 (objet relogeable, pas un binaire plat).
 $(BUILD)/boot.o: boot/boot.asm | $(BUILD)
 	$(NASM) -f elf32 $< -o $@
 
-# Modules C du kernel.
+# Modules C du kernel (couvre kmain.o, vga.o, et le snapshot kmain.b2.o).
 $(BUILD)/%.o: kernel/%.c | $(BUILD)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-# Édition de liens : layout imposé par linker.ld (kernel à 1 Mo). On lie avec le
-# cross-gcc (et non ld direct) pour récupérer libgcc (helpers arithmétiques).
-$(KERNEL): $(OBJS) linker.ld
-	$(CC) -T linker.ld -o $@ $(LDFLAGS) $(OBJS)
-	@grub-file --is-x86-multiboot $(KERNEL) \
-	  && echo "OK : $(KERNEL) est un binaire Multiboot valide" \
-	  || (echo "ERREUR : en-tête Multiboot invalide" && false)
+# --- Kernels ELF par brique --------------------------------------------------
+# Lié avec le cross-gcc (et non ld nu) pour récupérer libgcc. Le layout (kernel
+# à 1 Mo, .multiboot en tête) est imposé par linker.ld ; on valide l'en-tête.
+$(BUILD)/b2.kernel: $(B2_OBJS) linker.ld
+	$(CC) -T linker.ld -o $@ $(LDFLAGS) $(B2_OBJS)
+	@grub-file --is-x86-multiboot $@ && echo "OK : $@ est Multiboot" || (echo "ERREUR Multiboot" && false)
 
-# Image ISO bootable : kernel + config GRUB, empaquetés par grub-mkrescue.
-$(ISO): $(KERNEL) grub/grub.cfg
-	mkdir -p $(ISO_DIR)/boot/grub
-	cp $(KERNEL) $(ISO_DIR)/boot/naos.kernel
-	cp grub/grub.cfg $(ISO_DIR)/boot/grub/grub.cfg
-	grub-mkrescue -o $(ISO) $(ISO_DIR) 2>/dev/null
+$(BUILD)/b3.kernel: $(B3_OBJS) linker.ld
+	$(CC) -T linker.ld -o $@ $(LDFLAGS) $(B3_OBJS)
+	@grub-file --is-x86-multiboot $@ && echo "OK : $@ est Multiboot" || (echo "ERREUR Multiboot" && false)
 
-# Démarrage normal : QEMU boote l'ISO, GRUB charge le kernel (le vrai chemin B2).
-#   make run        → fenêtre
-#   make run QMP=1  → headless + socket QMP (capture : python3 tools/qemu-shot.py)
-run: $(ISO)
-	@$(if $(QMP),rm -f $(QMP_SOCK))
-	$(QEMU) -cdrom $(ISO) $(QEMU_OPTS)
+# --- ISO bootable GRUB (une par brique kernel) -------------------------------
+$(BUILD)/%.iso: $(BUILD)/%.kernel grub/grub.cfg
+	mkdir -p $(BUILD)/iso-$*/boot/grub
+	cp $< $(BUILD)/iso-$*/boot/naos.kernel
+	cp grub/grub.cfg $(BUILD)/iso-$*/boot/grub/grub.cfg
+	grub-mkrescue -o $@ $(BUILD)/iso-$* 2>/dev/null
 
-# Itération rapide : QEMU charge le kernel SANS GRUB (loader Multiboot intégré).
-# Pratique pour boucler vite ; le vrai test B2 reste `make run` (via GRUB).
-run-kernel: $(KERNEL)
-	@$(if $(QMP),rm -f $(QMP_SOCK))
-	$(QEMU) -kernel $(KERNEL) $(QEMU_OPTS)
-
-# --- Briques « boot sector » historiques (B0, B1) ----------------------------
-# B0 et B1 sont des binaires PLATS de 512 o (nasm -f bin), chargés à 0x7C00 par
-# le BIOS — un pipeline différent du kernel GRUB (B2+). On les garde rejouables
-# depuis un clone via ces cibles ; leurs sources sont les snapshots boot.asm.bN.
-#   make run-b0  → boot sector B0 (message via int 0x10)
-#   make run-b1  → boot sector B1 (real mode → mode protégé 32 bits)
-build/%.bin: boot/boot.asm.% | $(BUILD)
+# --- Boot sectors « binaire plat » (B0/B1) -----------------------------------
+# 512 o chargés à 0x7C00 par le BIOS — pipeline distinct du kernel GRUB.
+# Sources = snapshots boot/boot.asm.bN.
+$(BUILD)/%.bin: boot/boot.asm.% | $(BUILD)
 	$(NASM) -f bin $< -o $@
 
-run-b0: build/b0.bin
+# --- Lancement ---------------------------------------------------------------
+# Chaque cible accepte QMP=1 (headless + socket QMP, pour python3 tools/qemu-shot.py).
+run: run-$(LAST)               # alias : dernière brique
+
+run-b0: $(BUILD)/b0.bin
 	@$(if $(QMP),rm -f $(QMP_SOCK))
 	$(QEMU) -drive format=raw,file=$< $(QEMU_OPTS)
 
-run-b1: build/b1.bin
+run-b1: $(BUILD)/b1.bin
 	@$(if $(QMP),rm -f $(QMP_SOCK))
 	$(QEMU) -drive format=raw,file=$< $(QEMU_OPTS)
+
+run-b2: $(BUILD)/b2.iso
+	@$(if $(QMP),rm -f $(QMP_SOCK))
+	$(QEMU) -cdrom $< $(QEMU_OPTS)
+
+run-b3: $(BUILD)/b3.iso
+	@$(if $(QMP),rm -f $(QMP_SOCK))
+	$(QEMU) -cdrom $< $(QEMU_OPTS)
+
+# Itération rapide : QEMU charge le dernier kernel SANS GRUB (loader -kernel).
+run-kernel: $(BUILD)/$(LAST).kernel
+	@$(if $(QMP),rm -f $(QMP_SOCK))
+	$(QEMU) -kernel $< $(QEMU_OPTS)
 
 # QEMU figé en attente de GDB (port 1234). Autre terminal : gdb -> target remote :1234.
-debug: $(KERNEL)
-	$(QEMU) -kernel $(KERNEL) -s -S
+debug: $(BUILD)/$(LAST).kernel
+	$(QEMU) -kernel $< -s -S
 
 clean:
 	rm -rf $(BUILD)
