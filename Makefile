@@ -23,7 +23,7 @@ LDFLAGS := -ffreestanding -O2 -nostdlib -lgcc
 
 OBJS := $(BUILD)/boot.o $(BUILD)/kmain.o $(BUILD)/vga.o
 
-.PHONY: all run run-kernel debug clean distclean
+.PHONY: all run run-kernel run-b0 run-b1 debug clean distclean
 
 # Socket QMP : ouvert par `make run QMP=1` pour capturer l'écran (tools/qemu-shot.py).
 # (bloc ifdef et pas $(if …) : $(if) couperait sur les virgules de `,server,nowait`)
@@ -73,6 +73,23 @@ run: $(ISO)
 run-kernel: $(KERNEL)
 	@$(if $(QMP),rm -f $(QMP_SOCK))
 	$(QEMU) -kernel $(KERNEL) $(QEMU_OPTS)
+
+# --- Briques « boot sector » historiques (B0, B1) ----------------------------
+# B0 et B1 sont des binaires PLATS de 512 o (nasm -f bin), chargés à 0x7C00 par
+# le BIOS — un pipeline différent du kernel GRUB (B2+). On les garde rejouables
+# depuis un clone via ces cibles ; leurs sources sont les snapshots boot.asm.bN.
+#   make run-b0  → boot sector B0 (message via int 0x10)
+#   make run-b1  → boot sector B1 (real mode → mode protégé 32 bits)
+build/%.bin: boot/boot.asm.% | $(BUILD)
+	$(NASM) -f bin $< -o $@
+
+run-b0: build/b0.bin
+	@$(if $(QMP),rm -f $(QMP_SOCK))
+	$(QEMU) -drive format=raw,file=$< $(QEMU_OPTS)
+
+run-b1: build/b1.bin
+	@$(if $(QMP),rm -f $(QMP_SOCK))
+	$(QEMU) -drive format=raw,file=$< $(QEMU_OPTS)
 
 # QEMU figé en attente de GDB (port 1234). Autre terminal : gdb -> target remote :1234.
 debug: $(KERNEL)
