@@ -9,6 +9,7 @@
 #   make run-b5   → B5: IDT + CPU-exception handlers (divide-by-zero demo)  [kernel/ISO]
 #   make run-b6   → B6: keyboard (PS/2) + timer (PIT) via hardware IRQs     [kernel/ISO]
 #   make run-b7   → B7: physical memory (Multiboot map + frame allocator)   [kernel/ISO]
+#   make run-b8   → B8: paging (identity + higher-half, CR0.PG)             [kernel/ISO]
 #   make run-kernel / make debug → latest kernel, without GRUB (QEMU -kernel)
 # (No generic `run` target: we always launch a named brick, no ambiguity.)
 # Two pipelines: flat binary (B0/B1, nasm -f bin, 0x7C00) vs ELF kernel
@@ -38,15 +39,19 @@ B5_OBJS := $(BUILD)/boot.o $(BUILD)/kmain.b5.o $(BUILD)/vga.o $(BUILD)/gdt.o $(B
 B6_OBJS := $(BUILD)/boot.o $(BUILD)/kmain.b6.o $(BUILD)/vga.o $(BUILD)/gdt.o $(BUILD)/gdt_flush.o \
            $(BUILD)/idt.o $(BUILD)/isr.o $(BUILD)/isr_stubs.o \
            $(BUILD)/pic.o $(BUILD)/irq.o $(BUILD)/irq_stubs.o $(BUILD)/timer.o $(BUILD)/keyboard.o
-B7_OBJS := $(BUILD)/boot.o $(BUILD)/kmain.o    $(BUILD)/vga.o $(BUILD)/gdt.o $(BUILD)/gdt_flush.o \
+B7_OBJS := $(BUILD)/boot.o $(BUILD)/kmain.b7.o $(BUILD)/vga.o $(BUILD)/gdt.o $(BUILD)/gdt_flush.o \
            $(BUILD)/idt.o $(BUILD)/isr.o $(BUILD)/isr_stubs.o \
            $(BUILD)/pic.o $(BUILD)/irq.o $(BUILD)/irq_stubs.o $(BUILD)/timer.o $(BUILD)/keyboard.o \
            $(BUILD)/pmm.o
+B8_OBJS := $(BUILD)/boot.o $(BUILD)/kmain.o    $(BUILD)/vga.o $(BUILD)/gdt.o $(BUILD)/gdt_flush.o \
+           $(BUILD)/idt.o $(BUILD)/isr.o $(BUILD)/isr_stubs.o \
+           $(BUILD)/pic.o $(BUILD)/irq.o $(BUILD)/irq_stubs.o $(BUILD)/timer.o $(BUILD)/keyboard.o \
+           $(BUILD)/pmm.o $(BUILD)/paging.o
 
 # Latest brick (target of `make run-kernel` / `make debug` / default `make`).
-LAST := b7
+LAST := b8
 
-.PHONY: all run-b0 run-b1 run-b2 run-b3 run-b4 run-b5 run-b6 run-b7 run-b0-arm run-kernel debug clean distclean
+.PHONY: all run-b0 run-b1 run-b2 run-b3 run-b4 run-b5 run-b6 run-b7 run-b8 run-b0-arm run-kernel debug clean distclean
 
 # QMP socket: opened by `make run-bN QMP=1` to capture the screen (tools/qemu-shot.py).
 # (ifdef block and not $(if …): $(if) would cut on the commas of `,server,nowait`)
@@ -101,6 +106,10 @@ $(BUILD)/b7.kernel: $(B7_OBJS) linker.ld
 	$(CC) -T linker.ld -o $@ $(LDFLAGS) $(B7_OBJS)
 	@grub-file --is-x86-multiboot $@ && echo "OK: $@ is Multiboot" || (echo "Multiboot ERROR" && false)
 
+$(BUILD)/b8.kernel: $(B8_OBJS) linker.ld
+	$(CC) -T linker.ld -o $@ $(LDFLAGS) $(B8_OBJS)
+	@grub-file --is-x86-multiboot $@ && echo "OK: $@ is Multiboot" || (echo "Multiboot ERROR" && false)
+
 # --- GRUB bootable ISO (one per kernel brick) --------------------------------
 $(BUILD)/%.iso: $(BUILD)/%.kernel grub/grub.cfg
 	mkdir -p $(BUILD)/iso-$*/boot/grub
@@ -146,6 +155,10 @@ run-b6: $(BUILD)/b6.iso
 	$(QEMU) -cdrom $< $(QEMU_OPTS)
 
 run-b7: $(BUILD)/b7.iso
+	@$(if $(QMP),rm -f $(QMP_SOCK))
+	$(QEMU) -cdrom $< $(QEMU_OPTS)
+
+run-b8: $(BUILD)/b8.iso
 	@$(if $(QMP),rm -f $(QMP_SOCK))
 	$(QEMU) -cdrom $< $(QEMU_OPTS)
 

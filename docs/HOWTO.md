@@ -20,6 +20,7 @@ under [`howto/`](howto/) (easier to read and maintain):
 | 5 | B5 — IDT + CPU exceptions | [howto/05-idt.md](howto/05-idt.md) |
 | 6 | B6 — keyboard + timer (IRQs) | [howto/06-keyboard-timer.md](howto/06-keyboard-timer.md) |
 | 7 | B7 — physical memory | [howto/07-pmm.md](howto/07-pmm.md) |
+| 8 | B8 — paging (virtual memory) | [howto/08-paging.md](howto/08-paging.md) |
 | — | Appendices A (x86 asm) · B (`boot.asm` line by line) · C (`int 0x10`) | [howto/annexes.md](howto/annexes.md) |
 
 On this page: [Goal](#goal) · [Prerequisites](#prerequisites) ·
@@ -86,7 +87,7 @@ concepts and criteria.
 | [5](howto/05-idt.md) | B5 — IDT + CPU exceptions | ✅ done |
 | [6](howto/06-keyboard-timer.md) | B6 — Keyboard + timer | ✅ done |
 | [7](howto/07-pmm.md) | B7 — Physical memory | ✅ done |
-| 8  | B8 — Paging (virtual memory) | planned |
+| [8](howto/08-paging.md) | B8 — Paging (virtual memory) | ✅ done |
 | 9  | B9 — Kernel heap | planned |
 | 10 | B10 — Multitasking | planned |
 
