@@ -9,3 +9,6 @@ build/
 *.bin
 *.img
 *.iso
+
+# Exception : la police VGA 8x16 est un asset SOURCE (référence, pas un artefact) → versionnée
+!assets/fonts/*.bin
