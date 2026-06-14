@@ -17,7 +17,7 @@
   reconsidérer si on décide d'écrire notre propre loader UEFI. Reporté.
 
 ### C2 — Émulateur : QEMU + Bochs ✅
-- **QEMU** = runner quotidien (`make run`), rapide, stub GDB.
+- **QEMU** = runner quotidien (`make run-bN`), rapide, stub GDB.
 - **Bochs** = microscope de débogage (débogueur intégré pensé osdev) pour B1–B5 :
   inspecter real mode, GDT/IDT, `CR0`/`CR3` instruction par instruction, et surtout
   diagnostiquer les **triple-faults** que QEMU encaisse en silence (reset).
@@ -174,7 +174,7 @@ firmware. Ce qu'on fixe vs ce que QEMU apporte :
   EDK II) via `-bios OVMF.fd` / `-pflash` → machine UEFI pour tester un loader `.efi`.
 - Cohérent avec la frontière établie : le firmware, on ne l'écrit jamais — vrai matériel
   comme émulation. QEMU respecte la même limite (SeaBIOS donné, non modifié).
-- Pratique : `make run` ≈ `qemu-system-i386 -drive ...` et SeaBIOS charge notre secteur de boot.
+- Pratique : `make run-b0` ≈ `qemu-system-i386 -drive ...` et SeaBIOS charge notre secteur de boot.
 
 ---
 

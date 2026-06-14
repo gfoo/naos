@@ -5,8 +5,8 @@
 #   make run-b1   → B1 : real mode → mode protégé 32 bits                  [bin plat]
 #   make run-b2   → B2 : kmain() en C, chargé par GRUB (écrit à 0xB8000)   [kernel/ISO]
 #   make run-b3   → B3 : driver écran VGA (couleurs + défilement)          [kernel/ISO]
-#   make run      → alias de la DERNIÈRE brique (run-b3)
 #   make run-kernel / make debug → dernier kernel, sans GRUB (QEMU -kernel)
+# (Pas de cible `run` générique : on lance toujours une brique nommée, sans ambiguïté.)
 # Deux pipelines : binaire plat (B0/B1, nasm -f bin, 0x7C00) vs kernel ELF
 # Multiboot chargé par GRUB (B2+). Les briques kernel sont cumulatives :
 # B3 = B2 + driver ; on garde un snapshot du kmain de chaque brique (kmain.bN.c).
@@ -31,7 +31,7 @@ B3_OBJS := $(BUILD)/boot.o $(BUILD)/kmain.o $(BUILD)/vga.o
 # Dernière brique (cible de `make run-kernel` / `make debug` / `make` par défaut).
 LAST := b3
 
-.PHONY: all run run-b0 run-b1 run-b2 run-b3 run-kernel debug clean distclean
+.PHONY: all run-b0 run-b1 run-b2 run-b3 run-kernel debug clean distclean
 
 # Socket QMP : ouvert par `make run-bN QMP=1` pour capturer l'écran (tools/qemu-shot.py).
 # (bloc ifdef et pas $(if …) : $(if) couperait sur les virgules de `,server,nowait`)
@@ -80,9 +80,8 @@ $(BUILD)/%.bin: boot/boot.asm.% | $(BUILD)
 	$(NASM) -f bin $< -o $@
 
 # --- Lancement ---------------------------------------------------------------
-# Chaque cible accepte QMP=1 (headless + socket QMP, pour python3 tools/qemu-shot.py).
-run: run-$(LAST)               # alias : dernière brique
-
+# Une cible par brique (pas de `run` générique). Chacune accepte QMP=1
+# (headless + socket QMP, pour python3 tools/qemu-shot.py).
 run-b0: $(BUILD)/b0.bin
 	@$(if $(QMP),rm -f $(QMP_SOCK))
 	$(QEMU) -drive format=raw,file=$< $(QEMU_OPTS)

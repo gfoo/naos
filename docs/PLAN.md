@@ -93,7 +93,7 @@ naos/
 
 ## 4. Vérification
 
-- `make run` → QEMU, contrôle visuel (itération quotidienne).
+- `make run-bN` → QEMU, contrôle visuel d'une brique (itération quotidienne).
 - Débogage rapide : `qemu-system-i386 -s -S` + `gdb` (`target remote :1234`).
 - Débogage fin (microscope) : `make bochs` → débogueur intégré Bochs pour inspecter
   real mode, GDT/IDT, `CR0`/`CR3` instruction par instruction, et diagnostiquer les

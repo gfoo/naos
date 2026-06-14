@@ -13,25 +13,30 @@ d'assembler des morceaux tout faits.
 Prérequis (Debian/Ubuntu) :
 
 ```bash
-sudo apt install -y nasm qemu-system-x86
+sudo apt install -y nasm qemu-system-x86             # B0–B1 (boot sectors)
+sudo apt install -y grub-pc-bin xorriso mtools       # B2+ (ISO GRUB)
+./toolchain/build-i686-elf.sh                        # cross-compiler i686-elf-gcc (~20-40 min, une fois)
 ```
 
-Construire et lancer dans QEMU :
+Chaque brique a **sa** cible de lancement (pas de `make run` générique : on sait toujours
+*quelle* brique on lance) :
 
 ```bash
-make run
+make run-b0     # B0 : « naos B0: it boots! » (boot sector)
+make run-b1     # B1 : real mode → mode protégé 32 bits
+make run-b2     # B2 : kmain() en C, chargé par GRUB via Multiboot
+make run-b3     # B3 : driver écran VGA (couleurs + défilement)
 ```
 
-Tu dois voir SeaBIOS démarrer, puis `naos B0: it boots!`. Autres cibles :
+Ajoute `QMP=1` pour lancer sans fenêtre + capturer l'écran (`python3 tools/qemu-shot.py`).
+Autres cibles :
 
 ```bash
-make            # construit l'image disque (build/naos.img)
+make            # construit la dernière brique (build/b3.iso)
+make run-kernel # dernier kernel sans GRUB (QEMU -kernel) ; make debug = idem + stub GDB
 make clean      # efface build/
 make distclean  # remet le dépôt à l'état du dernier commit (confirmation ; préserve .claude/)
 ```
-
-> Le cross-compiler `i686-elf-gcc` n'est nécessaire qu'à partir de B2 — voir
-> `toolchain/build-i686-elf.sh`.
 
 ## Par où commencer
 
@@ -48,7 +53,7 @@ Le HOWTO peut se suivre **à la main** ou **avec un assistant** — le choix est
 ## Choix techniques
 
 x86 32 bits · QEMU (+ Bochs pour le débogage fin) · C + NASM · boot hybride (secteur maison
-puis GRUB) · cross-compiler `i686-elf-gcc` · workflow issue → branche → PR par brique.
+puis GRUB) · cross-compiler `i686-elf-gcc` · commit direct sur `main` par brique (projet solo).
 Détails et raisons dans le DESIGN-LOG.
 
 ## Structure
@@ -68,4 +73,7 @@ naos/
 Feuille de route en 13 briques (B0 → B12) ; statuts détaillés dans `docs/PLAN.md`.
 
 - ✅ **B0** — Setup & « It boots »
-- ⏳ **B1** — Boot sector maison (real mode → mode protégé)
+- ✅ **B1** — Boot sector maison (real mode → mode protégé)
+- ✅ **B2** — GRUB / Multiboot + premier kernel C
+- ✅ **B3** — Driver écran VGA (couleurs + défilement)
+- ⏳ **B4** — GDT propre (kernel)

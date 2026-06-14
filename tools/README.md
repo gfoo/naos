@@ -7,7 +7,7 @@ protocole de contrôle de QEMU), le script s'y attache et écrit `build/shot.png
 l'image et tu juges toi-même — pas de PASS/FAIL, pas d'OCR.
 
 ```sh
-make run QMP=1                  # terminal 1 : QEMU sans fenêtre + socket QMP
+make run-b3 QMP=1               # terminal 1 : une brique headless + socket QMP (run-b0/b1/b2/b3)
 python3 tools/qemu-shot.py      # terminal 2 : écrit build/shot.png
 ```
 

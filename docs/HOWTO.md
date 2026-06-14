@@ -129,11 +129,11 @@ B0 a un seul but : avoir une **chaîne de build qui marche** et la **preuve** qu
 exécuter notre propre code sur la machine (émulée). Pas encore de mode protégé, de GDT ni de
 C — ce sera B1 et B2. Ici, on pose le décor et on fait afficher une ligne à un boot sector.
 
-> **Lancer une brique depuis un clone.** Le dépôt évolue : à `HEAD`, **`make run`** lance la
-> *dernière* brique (le kernel GRUB, B2/B3). Les briques « boot sector » antérieures ont leur
-> propre cible : **`make run-b0`** (cette partie) et **`make run-b1`** (Partie 1) — binaires
-> plats lancés depuis `boot/boot.asm.b0` / `.b1`. Dans toute cette Partie 0, lis donc les
-> `make run` comme **`make run-b0`**.
+> **Lancer une brique.** Il n'y a **pas** de `make run` générique : chaque brique a sa cible
+> nommée — **`make run-b0`** (cette partie), **`make run-b1`** (Partie 1), `run-b2`, `run-b3`…
+> Ainsi on sait toujours *quelle* brique on lance. B0/B1 sont des binaires plats (depuis
+> `boot/boot.asm.b0` / `.b1`) ; B2+ des kernels chargés par GRUB. **Toute cette Partie 0 se
+> lance avec `make run-b0`.**
 
 **Dans cette partie :**
 - 0.1 — Le décor : QEMU, un PC complet en logiciel
@@ -159,7 +159,7 @@ C — ce sera B1 et B2. Ici, on pose le décor et on fait afficher une ligne à 
 ### 0.1 — Le décor : QEMU, un PC complet en logiciel
 
 QEMU n'est pas « un lanceur de programme » : c'est un **ordinateur entier émulé en logiciel**,
-firmware compris. Faire `make run`, c'est *allumer un PC virtuel*.
+firmware compris. Faire `make run-b0`, c'est *allumer un PC virtuel*.
 
 Ce que tu fixes, et ce que QEMU fournit tout seul :
 
@@ -220,13 +220,13 @@ Des flags qui resserviront (debug et vérification) :
 | `-S` | **gèle** le CPU au démarrage (attend GDB) |
 | `-qmp unix:sock,server,nowait` | pilotage programmatique (capture d'écran, état) |
 
-Le `Makefile` expose deux cibles principales :
+Le `Makefile` expose une cible de lancement **par brique** (et une de debug) :
 
-> **`make run`** — assemble, fabrique l'image, lance QEMU (fenêtre normale).
+> **`make run-b0`** — assemble, fabrique l'image, lance QEMU (fenêtre normale).
 > **`make debug`** — lance QEMU **figé** (`-s -S`), en attente d'un GDB sur `:1234`.
 
 ```bash
-make run     # itération quotidienne
+make run-b0  # lancer la brique B0
 make debug   # puis, dans un autre terminal :
              #   gdb -> target remote :1234 -> b *0x7c00 -> continue
 ```
@@ -272,8 +272,8 @@ build/naos.img  (le "disque" que QEMU monte)
 > le boot sector. Mais dès **B2**, l'image grossira :
 > `naos.img = [secteur de boot / GRUB] + [kernel] + …`, **assemblée à partir de plusieurs
 > pièces** (la règle deviendra un « link + assemble », plus un `cp`). Garder `naos.img`
-> distinct dès maintenant stabilise la cible `make run` (elle lance toujours *l'image*, quel
-> qu'en soit le contenu) et installe le modèle mental **composant vs disque**.
+> distinct dès maintenant stabilise la cible de lancement `make run-b0` (elle lance toujours
+> *l'image*, quel qu'en soit le contenu) et installe le modèle mental **composant vs disque**.
 
 #### (b) La chaîne d'exécution — de l'allumage à `0x7C00`
 
@@ -312,7 +312,7 @@ Deux « départs » à ne pas confondre :
 ### 0.3 — Le boot sector, construit pas à pas
 
 > **Point clé — la bonne méthode.** N'écris **jamais** le boot sector complet d'un coup.
-> Ajoute un petit bout, lance `make run`, observe, recommence. Le jour où ça plante, tu sais
+> Ajoute un petit bout, lance `make run-b0`, observe, recommence. Le jour où ça plante, tu sais
 > que c'est ton dernier ajout — pas un mystère parmi 30 lignes. On construit ici en 4
 > incréments ; **teste après chacun**.
 
@@ -330,7 +330,7 @@ times 510-($-$$) db 0   ; padding jusqu'à l'octet 510
 dw 0xAA55               ; signature de boot (offsets 510-511)
 ```
 
-`make run` → SeaBIOS affiche `Booting from Hard Disk...`, puis **écran noir**, sans rien
+`make run-b0` → SeaBIOS affiche `Booting from Hard Disk...`, puis **écran noir**, sans rien
 d'autre. C'est normal : on n'affiche rien encore.
 
 > **Que vérifie cette étape ?** Deux choses, sans afficher : (1) **pas** de « No bootable
@@ -357,7 +357,7 @@ times 510-($-$$) db 0
 dw 0xAA55
 ```
 
-`make run` → un `X` apparaît sous les lignes de SeaBIOS. **Preuve : on sait appeler le
+`make run-b0` → un `X` apparaît sous les lignes de SeaBIOS. **Preuve : on sait appeler le
 firmware (`int 0x10`) et il affiche.**
 
 > **Comment marche cet appel ?** `int 0x10` est une *fonction générique* : `AH` choisit la
@@ -391,7 +391,7 @@ times 510-($-$$) db 0
 dw 0xAA55
 ```
 
-`make run` → le message complet. **Preuve : la boucle d'affichage et la donnée `msg`.**
+`make run-b0` → le message complet. **Preuve : la boucle d'affichage et la donnée `msg`.**
 
 > **Pourquoi `msg` *après* `.hang` ?** Parce que le CPU exécute en séquence : s'il
 > rencontrait les octets de la chaîne, il les décoderait comme des instructions (charabia,
@@ -596,7 +596,7 @@ signature `55aa` (offset `0x1FE`).
 #### À l'œil (fenêtre)
 
 ```bash
-make run
+make run-b0
 ```
 
 SeaBIOS → `Booting from Hard Disk...` → `naos B0: it boots!` → curseur figé (le CPU est en
@@ -610,7 +610,7 @@ script. On lance QEMU **headless** avec un socket QMP (le protocole de contrôle
 on capture depuis un autre terminal :
 
 ```bash
-make run QMP=1                  # terminal 1 : QEMU sans fenêtre + socket QMP
+make run-b0 QMP=1               # terminal 1 : QEMU sans fenêtre + socket QMP
 python3 tools/qemu-shot.py      # terminal 2 : écrit build/shot.png
 ```
 
