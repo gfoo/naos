@@ -1,0 +1,127 @@
+; naos — B1 : boot sector real mode -> mode protégé 32 bits
+; -----------------------------------------------------------------------------
+; But : partir du real mode 16 bits (où le BIOS nous dépose) et basculer en mode
+; protégé 32 bits par nous-mêmes. Quatre gestes obligatoires (cf. PLAN §1.7) :
+;   1. activer la ligne A20 (sinon l'adressage est tronqué à 1 Mo)
+;   2. charger une GDT (table des segments) — en mode protégé, CS/DS ne sont plus
+;      des adresses mais des SÉLECTEURS qui indexent cette table
+;   3. mettre le bit PE (Protection Enable) de CR0
+;   4. far jump : recharger CS avec le sélecteur de code -> on exécute en 32 bits
+;
+; Preuve observable : un message en real mode (via BIOS int 0x10), puis — une fois
+; en 32 bits où int 0x10 N'EXISTE PLUS — un message écrit DIRECTEMENT dans la
+; mémoire vidéo VGA (0xB8000). Voir docs/HOWTO.md §1 (et Annexes A/B).
+;
+; Toujours un boot sector : 512 octets, chargé à 0x7C00, signature 0xAA55.
+
+bits 16
+org  0x7C00
+
+start:
+    cli
+    xor ax, ax
+    mov ds, ax              ; DS = ES = SS = 0 : adressage simple en real mode
+    mov es, ax
+    mov ss, ax
+    mov sp, 0x7C00          ; pile juste sous le code
+    sti
+
+    ; --- (preuve real mode) afficher un message via le BIOS ---
+    mov si, msg_rm
+.print:
+    lodsb
+    test al, al
+    jz .rm_done
+    mov ah, 0x0E            ; int 0x10 / téléscripteur
+    mov bh, 0x00
+    int 0x10
+    jmp .print
+.rm_done:
+
+    cli                     ; plus d'interruptions : on n'a pas (encore) d'IDT en PM
+
+    ; --- 1. activer A20 (méthode « Fast A20 », port 0x92 bit 1) ---
+    in  al, 0x92
+    or  al, 0000_0010b
+    out 0x92, al
+
+    ; --- 2. charger la GDT ---
+    lgdt [gdt_descriptor]
+
+    ; --- 3. mettre le bit PE de CR0 ---
+    mov eax, cr0
+    or  eax, 1
+    mov cr0, eax
+
+    ; --- 4. far jump : recharge CS = sélecteur de code, et vide le prefetch ---
+    jmp CODE_SEG:protected_mode
+
+; -----------------------------------------------------------------------------
+bits 32
+protected_mode:
+    ; recharger TOUS les segments de données avec le sélecteur data (0x10)
+    mov ax, DATA_SEG
+    mov ds, ax
+    mov es, ax
+    mov fs, ax
+    mov gs, ax
+    mov ss, ax
+    mov esp, 0x90000        ; pile mode protégé (sous 0x9FC00, zone libre real mode)
+
+    ; écrire directement dans le buffer texte VGA : 0xB8000, 2 octets par cellule
+    ; (octet 0 = caractère, octet 1 = attribut couleur). int 0x10 n'existe plus.
+    mov esi, msg_pm
+    mov edi, 0xB8000
+    mov ah, 0x0A            ; attribut : vert clair sur fond noir
+.pm_print:
+    lodsb                   ; AL = [DS:ESI], ESI++
+    test al, al
+    jz .hang
+    mov [edi], al           ; caractère
+    mov [edi + 1], ah       ; couleur
+    add edi, 2
+    jmp .pm_print
+
+.hang:
+    hlt
+    jmp .hang
+
+; -----------------------------------------------------------------------------
+; Données
+msg_rm db "naos B1: real mode OK, switching to 32-bit...", 13, 10, 0
+msg_pm db "naos B1: 32-bit protected mode!", 0
+
+; -----------------------------------------------------------------------------
+; GDT « plate » (flat) : base 0, limite 4 Go pour code ET data. On ne se sert pas
+; de la segmentation pour cloisonner (ce sera le rôle du paging plus tard) ; on la
+; neutralise pour adresser toute la mémoire linéairement.
+gdt_start:
+    dq 0x0                  ; descripteur nul (obligatoire, sélecteur 0x00)
+
+gdt_code:                   ; sélecteur 0x08
+    dw 0xFFFF               ; limite [0:15]
+    dw 0x0000               ; base  [0:15]
+    db 0x00                 ; base  [16:23]
+    db 1001_1010b           ; présent, DPL0, type code, exécutable, lisible
+    db 1100_1111b           ; G=1 (limite en pages), D=1 (32 bits), limite [16:19]
+    db 0x00                 ; base  [24:31]
+
+gdt_data:                   ; sélecteur 0x10
+    dw 0xFFFF
+    dw 0x0000
+    db 0x00
+    db 1001_0010b           ; présent, DPL0, type data, inscriptible
+    db 1100_1111b
+    db 0x00
+gdt_end:
+
+gdt_descriptor:
+    dw gdt_end - gdt_start - 1   ; limite = taille de la GDT - 1
+    dd gdt_start                 ; adresse linéaire de la GDT
+
+CODE_SEG equ gdt_code - gdt_start   ; 0x08
+DATA_SEG equ gdt_data - gdt_start   ; 0x10
+
+; -----------------------------------------------------------------------------
+times 510-($-$$) db 0
+dw 0xAA55
