@@ -105,6 +105,12 @@ B0 a un seul but : avoir une **chaîne de build qui marche** et la **preuve** qu
 exécuter notre propre code sur la machine (émulée). Pas encore de mode protégé, de GDT ni de
 C — ce sera B1 et B2. Ici, on pose le décor et on fait afficher une ligne à un boot sector.
 
+> **Lancer une brique depuis un clone.** Le dépôt évolue : à `HEAD`, **`make run`** lance la
+> *dernière* brique (le kernel GRUB, B2/B3). Les briques « boot sector » antérieures ont leur
+> propre cible : **`make run-b0`** (cette partie) et **`make run-b1`** (Partie 1) — binaires
+> plats lancés depuis `boot/boot.asm.b0` / `.b1`. Dans toute cette Partie 0, lis donc les
+> `make run` comme **`make run-b0`**.
+
 **Dans cette partie :**
 - 0.1 — Le décor : QEMU, un PC complet en logiciel
 - 0.2 — La chaîne complète : du bouton power à ton code
@@ -606,122 +612,687 @@ Ouvre `build/shot.png` et juge toi-même : pas de PASS/FAIL, pas d'OCR — juste
 
 ## Partie 1 — B1 : du real mode au mode protégé 32 bits
 
-> Source : `boot/boot.asm.b1` (le boot sector B1 est conservé sous ce nom — à partir
-> de B2, `boot/boot.asm` devient l'en-tête Multiboot). Build/run : `make` puis `make run`
-> **depuis le commit B1** (ou en pointant NASM sur `boot.asm.b1`).
+B0 nous a déposés en **real mode** 16 bits et a tout délégué au firmware (`int 0x10`). B1 fait
+le grand saut : passer le CPU en **mode protégé 32 bits**, l'environnement où tournera tout le
+reste de l'OS. Quatre gestes obligatoires — A20, GDT, bit PE, far jump — chacun expliqué puis
+assemblé pas à pas. À la fin, on affiche **sans le BIOS**, en écrivant droit dans la mémoire
+vidéo.
 
-### 1.1 — L'objectif
+> **Où vit ce code.** Le boot sector B1 est conservé dans **`boot/boot.asm.b1`** (à partir de
+> B2, `boot/boot.asm` est repris pour l'en-tête Multiboot). On le lance depuis un clone avec
+> **`make run-b1`** (binaire plat 512 o, pipeline distinct du kernel GRUB de B2+).
 
-B0 empruntait le firmware (`int 0x10`). B1 fait les **quatre gestes** qui font passer le CPU
-du *real mode* 16 bits (où le BIOS nous dépose) au *mode protégé* 32 bits — l'environnement où
-tournera tout le reste de l'OS :
+**Dans cette partie :**
+- 1.1 — Real mode vs mode protégé : ce qui change vraiment
+- 1.2 — Vue d'ensemble : les quatre gestes
+- 1.3 — A20 : la ligne d'adresse oubliée
+- 1.4 — La GDT : de « segment = adresse » à « segment = sélecteur »
+- 1.5 — La bascule : bit PE de `CR0` + far jump
+- 1.6 — Afficher sans le BIOS : écrire dans `0xB8000`
+- 1.7 — Le boot sector complet, construit pas à pas
+- 1.8 — Vérifier dans QEMU
 
-1. **A20** — la ligne d'adresse A20, désactivée à l'allumage pour compatibilité avec le
-   8086, tronque les adresses au-delà de 1 Mo. On l'active (sinon `0x100000` replierait sur 0).
-2. **GDT** — en mode protégé, `CS`/`DS`/… ne sont plus des adresses (real mode : `segment*16 +
-   offset`) mais des **sélecteurs** qui indexent une table de descripteurs, la *GDT*. On en
-   charge une « plate » (base 0, limite 4 Go) : on neutralise la segmentation.
-3. **bit PE de `CR0`** — Protection Enable. Le mettre fait *basculer* le CPU en mode protégé.
-4. **far jump** — un saut lointain `jmp SELECTEUR:offset` recharge `CS` avec le sélecteur de
-   code et vide le pipeline de pré-chargement : la première instruction *vraiment* 32 bits.
+**Termes clés (référence rapide) :**
 
-### 1.2 — La preuve observable
+- **Mode protégé** — le mode 32 bits du x86 : adresses 32 bits (4 Go), protection mémoire, base de tout OS moderne.
+- **A20** — la 21ᵉ ligne d'adresse (bit 20) ; désactivée à l'allumage par compatibilité 8086.
+- **GDT** (*Global Descriptor Table*) — table décrivant les segments ; en mode protégé, un registre de segment contient un **sélecteur** qui l'indexe.
+- **Descripteur de segment** — entrée de 8 octets : base, limite, droits d'accès, flags.
+- **Sélecteur** — index (×8) dans la GDT, chargé dans `CS`/`DS`/… (`0x08` = 1ʳᵉ entrée utile).
+- **`CR0`** — registre de contrôle ; son bit 0 (**PE**, *Protection Enable*) active le mode protégé.
+- **Far jump** — saut `selecteur:offset` qui recharge `CS` *et* vide le pipeline de pré-chargement.
+- **Triple fault** — trois fautes en cascade sans gestionnaire → le CPU se reset (reboot en boucle).
 
-Un message en real mode (via `int 0x10`), puis — une fois en 32 bits où **`int 0x10` n'existe
-plus** — un message écrit **directement** dans la mémoire vidéo VGA (`0xB8000`, 2 octets par
-cellule : caractère + attribut couleur). Si le second message s'affiche, c'est que du code
-32 bits s'est exécuté : la bascule a réussi.
+---
 
-### 1.3 — Points délicats
+### 1.1 — Real mode vs mode protégé : ce qui change vraiment
 
-- `cli` **avant** la bascule : en mode protégé on n'a pas encore d'IDT ; une interruption
-  partirait dans le décor (triple-fault). On reste interruptions coupées jusqu'à B5.
-- La **GDT plate** : descripteur nul obligatoire (sélecteur `0x00`), puis code (`0x08`) et
-  data (`0x10`). Flags `G=1` (limite en pages → 4 Go) et `D=1` (opérandes 32 bits).
-- A20 : méthode « Fast A20 » (port `0x92`, bit 1) — la plus simple ; suffit sous QEMU.
+Le x86 démarre en *real mode* pour rester compatible avec le 8086 de 1978. C'est un monde
+16 bits, sans protection, où une adresse se calcule `segment × 16 + offset` (d'où le plafond
+historique ~1 Mo). On y a fait B0. Le *mode protégé* est l'autre monde :
 
-### 1.4 — Vérification
+| | Real mode (B0) | Mode protégé (B1+) |
+|---|---|---|
+| Largeur | 16 bits | **32 bits** (registres `eax`…, offsets 32 bits) |
+| Adresse max | ~1 Mo | **4 Go** |
+| Segments | `CS`=adresse÷16 | `CS`=**sélecteur** vers un descripteur (base+limite+droits) |
+| Services BIOS (`int 0x10`…) | **disponibles** | **disparus** (le BIOS est du code 16 bits) |
+| Protection | aucune | niveaux de privilège (ring 0–3), limites de segment |
 
-```bash
-make run                      # à l'œil : message real mode, puis message vert en 32 bits
-make run QMP=1                # (autre terminal) python3 tools/qemu-shot.py
+> **La conséquence qui surprend.** En basculant, on **perd `int 0x10`** : le BIOS est du code
+> 16 bits, inaccessible en 32 bits. Pour afficher, il faut désormais écrire *soi-même* dans la
+> mémoire vidéo (`0xB8000`, cf. 0.4 et 1.6). C'est précisément ce qui rend la bascule
+> *observable* : si un message 32 bits apparaît, c'est qu'on a réussi.
+
+### 1.2 — Vue d'ensemble : les quatre gestes
+
+Entrer en mode protégé, c'est exactement quatre opérations, dans cet ordre :
+
+```
+real mode 16 bits
+   │  1. cli                  ← couper les interruptions (pas encore d'IDT)
+   │  2. activer A20          ← débloquer l'adressage au-delà de 1 Mo
+   │  3. lgdt [gdt]           ← charger une table de descripteurs de segments
+   │  4. CR0.PE = 1           ← BASCULE : le CPU est maintenant en mode protégé
+   ▼  5. jmp 0x08:suite       ← far jump : recharge CS, vide le prefetch
+mode protégé 32 bits  (première instruction « bits 32 »)
 ```
 
-Le message « 32-bit protected mode! » apparaît **en haut à gauche** : on a écrit à `0xB8000`
-= début exact de la mémoire vidéo (ligne 0). Critère B1 atteint.
+> **Pourquoi `cli` d'abord.** En mode protégé, les interruptions passent par une **IDT** qu'on
+> n'a pas encore (ce sera B5). Si une interruption matérielle tombait pendant ou après la
+> bascule, le CPU chercherait un gestionnaire inexistant → faute → faute → **triple fault** →
+> reset. On coupe donc les interruptions (`cli`) et on ne les rallumera qu'en B5.
+
+### 1.3 — A20 : la ligne d'adresse oubliée
+
+Sur le 8086, le calcul `segment × 16 + offset` pouvait dépasser `0xFFFFF` (1 Mo) ; ça
+« repliait » vers 0 (*wrap-around*). Des programmes en dépendaient. Quand le 80286 a ajouté
+une 21ᵉ ligne d'adresse (A20, le bit 20), IBM l'a **désactivée au démarrage** pour préserver
+ce repli. Résultat : tant qu'A20 est off, une adresse comme `0x100000` (1 Mo) se replie sur
+`0x0` — désastreux dès qu'on adresse au-delà de 1 Mo (notre kernel ira à 1 Mo en B2).
+
+On active donc A20. Trois méthodes existent (port clavier `0x64`, BIOS `int 0x15`, *Fast A20*) ;
+on prend la plus simple, **Fast A20** via le port `0x92` :
+
+```nasm
+    in  al, 0x92        ; lire le registre de contrôle système
+    or  al, 0000_0010b  ; bit 1 = A20 enable
+    out 0x92, al        ; réécrire
+```
+
+> **Pourquoi Fast A20 ici.** C'est deux instructions, et QEMU (comme tout chipset moderne) le
+> supporte. Les méthodes par contrôleur clavier sont historiquement plus « universelles » mais
+> bien plus longues (attentes de status). Pour un projet pédagogique sous QEMU, `0x92` suffit.
+
+### 1.4 — La GDT : de « segment = adresse » à « segment = sélecteur »
+
+C'est le cœur conceptuel de B1. En real mode, `CS = 0x07C0` *signifiait* « base = `0x7C00` ».
+En mode protégé, un registre de segment ne contient plus une adresse mais un **sélecteur** :
+un index dans une table, la **GDT** (*Global Descriptor Table*). Chaque entrée de la GDT est un
+**descripteur** de 8 octets décrivant un segment : sa **base**, sa **limite**, et ses **droits**.
+
+On charge une GDT « **plate** » (*flat*) : un segment de code et un segment de données couvrant
+**toute** la mémoire (base 0, limite 4 Go). Autrement dit, on *neutralise* la segmentation —
+le cloisonnement mémoire viendra plus tard via le **paging** (B8), pas via les segments.
+
+La GDT minimale a trois entrées :
+
+| Index | Sélecteur | Rôle |
+|---|---|---|
+| 0 | `0x00` | **descripteur nul** — obligatoire ; un chargement de `0x00` est une erreur volontaire |
+| 1 | `0x08` | segment de **code** (exécutable, base 0, limite 4 Go) |
+| 2 | `0x10` | segment de **données** (inscriptible, base 0, limite 4 Go) |
+
+> **Pourquoi `0x08` et `0x10` ?** Un sélecteur n'est pas l'index brut : c'est `index × 8`
+> (chaque descripteur fait 8 octets), les 3 bits bas servant au niveau de privilège (RPL) et au
+> choix de table. Entrée 1 → `1×8 = 0x08`, entrée 2 → `2×8 = 0x10`.
+
+Un descripteur de 8 octets a un format historique éclaté (les champs base et limite sont coupés
+en morceaux pour rester compatible 80286). Voici le descripteur de **code** plat, octet par
+octet — c'est `1001_1010b` / `1100_1111b` qu'il faut comprendre :
+
+```nasm
+gdt_code:
+    dw 0xFFFF        ; limite [0:15]      ┐ limite = 0xFFFFF (20 bits)
+    dw 0x0000        ; base  [0:15]       │
+    db 0x00          ; base  [16:23]      ├─ base = 0
+    db 1001_1010b    ; octet d'accès      │   P=1 DPL=00 S=1 | type=1010 (code, exéc, lisible)
+    db 1100_1111b    ; flags + limite[16:19]  G=1 D=1 0 0 | 1111
+    db 0x00          ; base  [24:31]      ┘
+```
+
+- **Octet d'accès `1001_1010`** : `P`=présent, `DPL`=00 (ring 0), `S`=1 (segment code/data),
+  puis le type `1010` = *code, exécutable, lisible*. (Le segment **data** a `1001_0010` : type
+  `0010` = *data, inscriptible*.)
+- **Flags `1100`** : `G`=1 → la limite se compte en **pages de 4 Ko** (`0xFFFFF × 4 Ko` = 4 Go),
+  et `D`=1 → opérandes/adresses **32 bits** par défaut. Les 4 bits bas (`1111`) = limite[16:19].
+
+On dit au CPU où trouver cette table avec un **pseudo-descripteur** (taille − 1, puis adresse
+linéaire) chargé par `lgdt` :
+
+```nasm
+gdt_descriptor:
+    dw gdt_end - gdt_start - 1   ; limite : taille de la GDT moins 1
+    dd gdt_start                 ; adresse linéaire de la GDT
+
+    ...
+    lgdt [gdt_descriptor]
+```
+
+### 1.5 — La bascule : bit PE de `CR0` + far jump
+
+Tout est prêt ; deux dernières instructions font le saut de monde :
+
+```nasm
+    mov eax, cr0
+    or  eax, 1               ; bit 0 = PE (Protection Enable)
+    mov cr0, eax             ; <- À CET INSTANT, le CPU est en mode protégé
+    jmp CODE_SEG:protected_mode   ; far jump (CODE_SEG = 0x08)
+```
+
+> **Pourquoi le far jump est indispensable.** Mettre `PE` ne suffit pas : `CS` contient encore
+> l'ancienne valeur 16 bits, et le CPU a déjà **pré-chargé** (prefetch) des instructions
+> décodées en 16 bits. Un **far jump** (`jmp selecteur:offset`) fait deux choses d'un coup :
+> il recharge `CS` avec le sélecteur de code `0x08` (donc le bon descripteur), et il **vide le
+> pipeline** — la prochaine instruction est re-décodée *en 32 bits*. C'est la première
+> instruction « vraiment » 32 bits, marquée `bits 32` dans le source.
+
+Juste après, on recharge tous les **segments de données** avec le sélecteur data `0x10` (en
+real mode ils valaient 0 ; ils doivent maintenant pointer le descripteur data), et on installe
+une pile 32 bits :
+
+```nasm
+bits 32
+protected_mode:
+    mov ax, DATA_SEG     ; 0x10
+    mov ds, ax
+    mov es, ax
+    mov fs, ax
+    mov gs, ax
+    mov ss, ax
+    mov esp, 0x90000     ; pile en zone libre
+```
+
+### 1.6 — Afficher sans le BIOS : écrire dans `0xB8000`
+
+`int 0x10` a disparu. Mais la mémoire vidéo texte, elle, est toujours là — c'est de la RAM
+mappée à **`0xB8000`** (cf. 0.4) : 80×25 **cellules de 2 octets** (octet bas = caractère CP437,
+octet haut = **attribut** couleur : 4 bits avant-plan, 4 bits fond). Afficher un caractère vert,
+c'est poser deux octets :
+
+```nasm
+    mov esi, msg_pm
+    mov edi, 0xB8000
+    mov ah, 0x0A         ; attribut : vert clair (0x0A) sur fond noir
+.pm_print:
+    lodsb                ; AL = [esi], esi++
+    test al, al
+    jz .hang
+    mov [edi], al        ; caractère
+    mov [edi + 1], ah    ; couleur
+    add edi, 2           ; cellule suivante
+    jmp .pm_print
+```
+
+> **Pourquoi le message atterrit en haut à gauche.** `0xB8000` = **cellule (0,0)** = coin
+> supérieur gauche. On écrase donc la première ligne (la version SeaBIOS). C'est voulu : voir
+> le texte vert *là* prouve qu'on écrit la mémoire vidéo nous-mêmes, en 32 bits.
+
+### 1.7 — Le boot sector complet, construit pas à pas
+
+Comme en 0.3 : on assemble les briques dans l'ordre, mais ici on **teste à la fin** (la bascule
+ne se découpe pas en sous-étapes observables — soit on arrive en 32 bits, soit triple fault).
+Le squelette final reprend B0 (segments, pile, message real mode via `int 0x10`) puis enchaîne
+les sections 1.3 → 1.6. Le fichier complet est `boot/boot.asm.b1` ; sa colonne vertébrale :
+
+```nasm
+bits 16
+org  0x7C00
+start:
+    cli / xor ax,ax / mov ds,es,ss / mov sp,0x7C00 / sti   ; (B0)
+    mov si, msg_rm  ... int 0x10  ...                       ; message real mode (B0)
+    cli                                                     ; 1.2
+    in al,0x92 / or al,2 / out 0x92,al                      ; 1.3  A20
+    lgdt [gdt_descriptor]                                   ; 1.4  GDT
+    mov eax,cr0 / or eax,1 / mov cr0,eax                    ; 1.5  PE
+    jmp CODE_SEG:protected_mode                             ; 1.5  far jump
+bits 32
+protected_mode:
+    mov ax,DATA_SEG / mov ds.. / mov esp,0x90000            ; 1.5  segments + pile
+    ... écrire msg_pm à 0xB8000 ...                          ; 1.6
+.hang: hlt / jmp .hang
+msg_rm db "naos B1: real mode OK, switching to 32-bit...",13,10,0
+msg_pm db "naos B1: 32-bit protected mode!",0
+gdt_start: ... gdt_code ... gdt_data ... gdt_end            ; 1.4
+gdt_descriptor: dw gdt_end-gdt_start-1 / dd gdt_start
+CODE_SEG equ gdt_code-gdt_start    ; 0x08
+DATA_SEG equ gdt_data-gdt_start    ; 0x10
+times 510-($-$$) db 0
+dw 0xAA55
+```
+
+> **Toujours un boot sector.** B1 reste un binaire plat de 512 o chargé à `0x7C00` avec la
+> signature `0xAA55` : c'est *nous* qui faisons la bascule, pas GRUB (ça, c'est B2). D'où
+> `org 0x7C00` et le `times … db 0` / `dw 0xAA55` de B0.
+
+### 1.8 — Vérifier dans QEMU
+
+```bash
+make run-b1                   # à l'œil : message real mode, puis message vert 32 bits
+make run-b1 QMP=1             # (autre terminal) python3 tools/qemu-shot.py
+```
+
+Attendu : la ligne real mode « naos B1: real mode OK, switching to 32-bit... » dans le flux
+SeaBIOS, **puis** « naos B1: 32-bit protected mode! » en **vert, en haut à gauche**. Ce second
+message ne peut avoir été écrit que par du code 32 bits (le BIOS n'existe plus) : **la bascule
+a réussi**. Critère B1 atteint.
+
+> **Si ça reboucle (triple fault).** Le suspect nº 1 est la GDT (descripteur mal encodé) ou le
+> far jump (mauvais sélecteur). En real mode il n'y a pas de message d'erreur : sors `make
+> debug` (GDB) ou, pour voir *pourquoi* le CPU reset, Bochs (cf. `DESIGN-LOG.md`, C2).
 
 ---
 
 ## Partie 2 — B2 : GRUB + Multiboot + premier kernel C
 
-> Fichiers : `boot/boot.asm` (en-tête Multiboot + stub), `kernel/kmain.c`, `linker.ld`,
-> `grub/grub.cfg`, `Makefile`. Toolchain : `i686-elf-gcc` (cf. `toolchain/build-i686-elf.sh`).
+B1 a *montré* comment entrer en mode protégé à la main. Maintenant on **délègue** ce démarrage
+à GRUB (choix hybride C4 : comprendre d'abord, déléguer ensuite) et on écrit notre premier code
+en **C**. C'est un tournant : le boot sector maison disparaît, remplacé par un **kernel ELF**
+chargé à 1 Mo, fabriqué par un **cross-compiler** et empaqueté dans une **ISO bootable**.
 
-### 2.1 — Pourquoi déléguer à GRUB
+> **Où vit ce code.** `boot/boot.asm` (réécrit : en-tête Multiboot + stub), `kernel/kmain.c`,
+> `linker.ld`, `grub/grub.cfg`, et un `Makefile` refondu. Toolchain : `i686-elf-gcc`.
 
-B1 a *montré* comment entrer en mode protégé. À partir d'ici, on **délègue** ce démarrage à
-GRUB via la spec **Multiboot 1** (choix hybride C4 : comprendre d'abord, déléguer ensuite).
-GRUB nous livre déjà en mode protégé 32 bits, A20 et GDT faits, kernel chargé à **1 Mo**. On
-se concentre désormais sur le kernel, en **C**.
+**Dans cette partie :**
+- 2.1 — Pourquoi déléguer le boot à GRUB
+- 2.2 — La spec Multiboot : le contrat entre GRUB et notre kernel
+- 2.3 — Le cross-compiler : pourquoi, et comment le construire
+- 2.4 — Le stub d'amorçage en ASM (`boot/boot.asm`)
+- 2.5 — Le linker script : placer le kernel à 1 Mo
+- 2.6 — Le premier `kmain()` en C
+- 2.7 — Fabriquer l'ISO bootable (GRUB)
+- 2.8 — Build & vérifier
 
-### 2.2 — Les trois pièces
+**Termes clés (référence rapide) :**
 
-- **En-tête Multiboot** (`boot/boot.asm`, section `.multiboot`) : trois `dd` — magic
-  `0x1BADB002`, flags, checksum (la somme des trois doit faire 0). GRUB le cherche dans les
-  **8 premiers Ko** du binaire → `linker.ld` place `.multiboot` en tête de `.text`.
-- **Stub `_start`** : installe une pile (`esp`), appelle `kmain`, puis `cli`/`hlt`.
-- **`linker.ld`** : `ENTRY(_start)`, base à `1M`, sections alignées sur 4 Ko.
+- **GRUB** — *bootloader* standard ; sait charger un kernel **Multiboot** et nous livre en mode protégé.
+- **Multiboot 1** — spec définissant un *en-tête* que le kernel expose et un *état* que GRUB garantit à l'entrée.
+- **Cross-compiler** — compilateur produisant du code pour une cible (`i686-elf`) différente de l'hôte.
+- **Freestanding** — code C **sans** bibliothèque standard ni OS (pas de `printf`, pas de `malloc`).
+- **ELF** — format de fichier objet/exécutable Unix ; notre kernel est un ELF 32 bits.
+- **Linker script** (`.ld`) — décrit l'agencement mémoire des sections du binaire final.
+- **`grub-mkrescue`** — fabrique une ISO bootable contenant GRUB + notre kernel.
 
-### 2.3 — Le cross-compiler (pourquoi, rappel C5)
+---
 
-Le `gcc` système produit des binaires *Linux* (libc, format hôte). Notre kernel tourne **sans
-OS** : on compile *freestanding* (`-ffreestanding -nostdlib`) avec un toolchain `i686-elf` qui
-ne fait **aucune hypothèse hôte**. On lie avec `i686-elf-gcc` (et non `ld` nu) pour récupérer
-`libgcc` (helpers arithmétiques 64 bits, etc.).
+### 2.1 — Pourquoi déléguer le boot à GRUB
 
-### 2.4 — Build & vérification
+B1 nous a fait *comprendre* A20 / GDT / PE / far jump. Refaire tout ça à la main à chaque
+démarrage — plus le chargement du kernel depuis le disque (`int 0x13`), la carte mémoire
+(`int 0x15`), etc. — serait long et hors-sujet pour apprendre le *kernel*. GRUB fait tout ce
+travail et nous livre dans un état connu :
 
-```bash
-make                          # compile le kernel, vérifie l'en-tête Multiboot, fabrique l'ISO
-make run                      # QEMU boote l'ISO → GRUB → kmain()  (le vrai chemin B2)
-make run-kernel               # raccourci : QEMU charge le kernel SANS GRUB (-kernel)
+| À l'entrée de notre kernel, GRUB garantit… | …ce que ça nous épargne |
+|---|---|
+| CPU en **mode protégé 32 bits** | A20, GDT, bit PE, far jump (tout B1) |
+| Kernel chargé en mémoire à **1 Mo** | lecture de secteurs disque (`int 0x13`) |
+| `eax` = magic `0x2BADB002`, `ebx` → infos Multiboot | détection mémoire (`int 0x15` E820) |
+| Interruptions **coupées**, pas de pagination | un point de départ propre |
+
+> **« Hybride », rappel C4.** On garde B1 comme *leçon* (boot sector maison, dans
+> `boot.asm.b1`) ; à partir de B2 on *délègue* à GRUB. Plus tard, B11 (optionnel) remplacera
+> GRUB par notre propre loader — une fois l'OS fonctionnel.
+
+### 2.2 — La spec Multiboot : le contrat entre GRUB et notre kernel
+
+Pour que GRUB accepte de charger notre binaire, celui-ci doit exposer un **en-tête Multiboot**
+dans ses **8 premiers Ko** : trois mots de 32 bits.
+
+```nasm
+MB_MAGIC    equ 0x1BADB002             ; constante reconnue par GRUB
+MB_FLAGS    equ MB_ALIGN | MB_MEMINFO  ; options demandées
+MB_CHECKSUM equ -(MB_MAGIC + MB_FLAGS) ; magic + flags + checksum == 0
 ```
 
-`make` valide `grub-file --is-x86-multiboot build/naos.kernel`. Critère B2 : `kmain()`
-s'exécute (preuve : il écrit à l'écran — voir B3).
+- **magic** `0x1BADB002` : la signature que GRUB cherche.
+- **flags** : nos demandes — ici `MB_ALIGN` (aligner les modules sur des pages) et `MB_MEMINFO`
+  (fournir la carte mémoire).
+- **checksum** : choisi pour que `magic + flags + checksum` fasse **0** (sur 32 bits). C'est la
+  vérification d'intégrité de GRUB.
 
-> **Dépendances** : `i686-elf-gcc` (construit une fois via `toolchain/build-i686-elf.sh`),
-> et pour l'ISO : `grub-pc-bin`, `xorriso`, `mtools`.
+> **Deux nombres magiques à ne pas confondre.** `0x1BADB002` est ce que *nous* mettons dans
+> l'en-tête (« charge-moi »). `0x2BADB002` est ce que *GRUB* met dans `eax` à l'entrée (« c'est
+> bien moi qui t'ai chargé, en Multiboot »). On exploitera `ebx` (infos mémoire) en B7.
+
+### 2.3 — Le cross-compiler : pourquoi, et comment le construire
+
+Le `gcc` du système produit des exécutables **Linux** : ils supposent une libc, un format de
+sortie, un OS sous eux. Notre kernel tourne **sans OS** — il *est* ce qui tournera. On compile
+donc *freestanding*, avec un toolchain **`i686-elf`** qui ne fait **aucune hypothèse hôte**
+(reco OSDev, choix C5).
+
+```bash
+./toolchain/build-i686-elf.sh        # construit binutils + gcc dans ~/opt/cross (~20-40 min)
+# prérequis Debian/Ubuntu :
+#   sudo apt install -y build-essential bison flex libgmp-dev libmpc-dev libmpfr-dev texinfo wget
+~/opt/cross/bin/i686-elf-gcc --version
+```
+
+Le script compile **binutils** (assembleur/linker cible) puis **gcc** en `--without-headers
+--enable-languages=c` (pas de libc : on n'en a pas). On compile avec `-ffreestanding -nostdlib`
+et on **lie avec `i686-elf-gcc`** (pas `ld` nu) pour récupérer `libgcc` (les helpers que gcc
+appelle pour, p. ex., les divisions 64 bits).
+
+> **Pourquoi pas `gcc -m32` de l'hôte ?** Ça *peut* marcher, mais le cross-compiler élimine une
+> classe entière de bugs sournois (en-têtes hôte tirés par erreur, hypothèses d'ABI, options de
+> sécurité Linux injectées). C5 tranche : `i686-elf-gcc`, construit une fois pour toutes.
+
+### 2.4 — Le stub d'amorçage en ASM (`boot/boot.asm`)
+
+GRUB nous livre en 32 bits, mais ne connaît pas `kmain`. Il faut un petit **stub** qui (1)
+porte l'en-tête Multiboot, (2) installe une pile, (3) appelle `kmain`. C'est tout `boot.asm`
+désormais :
+
+```nasm
+bits 32
+section .multiboot          ; <- doit tomber dans les 8 premiers Ko (cf. linker.ld)
+align 4
+    dd MB_MAGIC
+    dd MB_FLAGS
+    dd MB_CHECKSUM
+
+section .bss
+align 16
+stack_bottom:
+    resb 16384              ; 16 Kio de pile
+stack_top:
+
+section .text
+global _start
+extern kmain
+_start:
+    mov esp, stack_top      ; installer la pile (croît vers le bas)
+    call kmain              ; -> notre C
+.hang:
+    cli
+    hlt
+    jmp .hang
+```
+
+> **Pourquoi installer la pile soi-même.** La spec Multiboot ne garantit *pas* un `esp`
+> utilisable. Or le C a besoin d'une pile dès le premier appel de fonction (variables locales,
+> adresses de retour). On réserve donc 16 Kio en `.bss` et on pointe `esp` sur son sommet —
+> avant le moindre `call`.
+
+> **Convention d'appel (System V i386).** `call kmain` empile l'adresse de retour et saute ;
+> `kmain` ne prend aucun argument et ne renvoie rien. Si jamais elle revenait, le `cli`/`hlt`
+> arrête proprement la machine.
+
+### 2.5 — Le linker script : placer le kernel à 1 Mo
+
+Le compilateur produit des sections (`.text`, `.rodata`, `.data`, `.bss`) ; le **linker
+script** dit *où* les poser en mémoire et *dans quel ordre* :
+
+```ld
+ENTRY(_start)
+SECTIONS {
+    . = 1M;                              /* le kernel commence à 1 Mo */
+    .text BLOCK(4K) : ALIGN(4K) {
+        *(.multiboot)                    /* en-tête Multiboot EN PREMIER */
+        *(.text)
+    }
+    .rodata BLOCK(4K) : ALIGN(4K) { *(.rodata) }
+    .data   BLOCK(4K) : ALIGN(4K) { *(.data) }
+    .bss    BLOCK(4K) : ALIGN(4K) { *(COMMON) *(.bss) }
+}
+```
+
+- `. = 1M` : l'adresse de départ. **1 Mo** est conventionnel — au-dessus de la zone basse
+  réservée (IVT, BIOS, mémoire vidéo VGA à `0xB8000`).
+- `*(.multiboot)` placé **en tête** de `.text` : garantit que l'en-tête est dans les 8 premiers
+  Ko, sinon GRUB ne le trouve pas et refuse le kernel.
+- `ALIGN(4K)` : sections alignées sur des pages — utile dès qu'on activera le paging (B8).
+
+### 2.6 — Le premier `kmain()` en C
+
+En B2, `kmain` n'a qu'à **prouver qu'elle tourne**. Pas encore de driver : on écrit directement
+dans la mémoire vidéo (comme en 1.6, mais en C) :
+
+```c
+/* kernel/kmain.c (version B2) */
+void kmain(void)
+{
+    const char *msg = "naos B2: kmain() running, loaded by GRUB via Multiboot.";
+    volatile unsigned short *vga = (unsigned short *)0xB8000;
+    for (int i = 0; msg[i]; i++)
+        vga[i] = (unsigned short)(unsigned char)msg[i] | (0x0A << 8); /* vert clair */
+    for (;;)
+        __asm__ volatile ("hlt");
+}
+```
+
+> **Pourquoi `volatile`.** Le compilateur, voyant qu'on écrit dans un tableau jamais relu,
+> serait tenté de *supprimer* ces écritures. `volatile` lui interdit d'optimiser : chaque
+> écriture doit réellement atteindre la mémoire vidéo. (Le vrai driver, B3, généralise ça.)
+
+### 2.7 — Fabriquer l'ISO bootable (GRUB)
+
+GRUB lit sa config dans `grub/grub.cfg` (une seule entrée, démarrage immédiat) :
+
+```
+set timeout=0
+set default=0
+menuentry "naos" {
+    multiboot /boot/naos.kernel
+    boot
+}
+```
+
+On assemble une arborescence `boot/grub/` puis on la transforme en ISO avec `grub-mkrescue`
+(prérequis : `grub-pc-bin`, `xorriso`, `mtools`). Le `Makefile` s'en charge :
+
+```make
+$(ISO): $(KERNEL) grub/grub.cfg
+	mkdir -p $(ISO_DIR)/boot/grub
+	cp $(KERNEL) $(ISO_DIR)/boot/naos.kernel
+	cp grub/grub.cfg $(ISO_DIR)/boot/grub/grub.cfg
+	grub-mkrescue -o $(ISO) $(ISO_DIR)
+```
+
+### 2.8 — Build & vérifier
+
+```bash
+make                          # compile, VÉRIFIE l'en-tête Multiboot, fabrique l'ISO
+make run                      # QEMU boote l'ISO → GRUB → kmain()   (le vrai chemin B2)
+make run-kernel               # raccourci : QEMU charge le kernel SANS GRUB (loader -kernel)
+```
+
+Le `Makefile` valide automatiquement `grub-file --is-x86-multiboot build/naos.kernel` : si
+l'en-tête est mal formé, le build échoue *avant* QEMU. Au boot, le message vert prouve que
+`kmain()` (du **C**, chargé par **GRUB**) s'exécute. **Critère B2 atteint.**
+
+> **`make run` vs `make run-kernel`.** Les deux chargent le *même* kernel Multiboot ; seul le
+> loader diffère : GRUB-depuis-l'ISO vs le loader Multiboot intégré de QEMU (`-kernel`). Le
+> critère B2 dit explicitement *via GRUB* → c'est `make run` qui fait foi ; `run-kernel` sert à
+> itérer vite.
 
 ---
 
 ## Partie 3 — B3 : driver écran VGA
 
-> Fichiers : `include/vga.h`, `kernel/vga.c`, `kernel/kmain.c`.
+En B2, `kmain` écrivait à `0xB8000` à la main, octet par octet. Ce n'est pas tenable : on veut
+un vrai **driver écran** — une petite API (`vga_write`, couleurs, défilement) sur laquelle tout
+le reste de l'OS affichera. B3 transforme le « poser des octets » en abstraction réutilisable.
 
-### 3.1 — Le buffer texte VGA
+> **Où vit ce code.** `include/vga.h` (l'API), `kernel/vga.c` (l'implémentation),
+> `kernel/kmain.c` (qui s'en sert). Compilés par le même `Makefile` qu'en B2.
 
-À `0xB8000` : 80×25 cellules de **2 octets** — octet bas = caractère (CP437), octet haut =
-**attribut** (4 bits avant-plan, 4 bits fond). Écrire un caractère coloré = poser un `uint16_t`
-à la bonne cellule. Pas de BIOS : on est en C freestanding, on tape la mémoire directement.
+**Dans cette partie :**
+- 3.1 — Le buffer texte VGA, en détail
+- 3.2 — L'octet d'attribut : encoder les couleurs
+- 3.3 — L'API et l'état du driver
+- 3.4 — Effacer l'écran : `vga_init`
+- 3.5 — `vga_putchar` : caractères de contrôle, curseur, retour à la ligne
+- 3.6 — Le défilement (scroll)
+- 3.7 — La démo dans `kmain`
+- 3.8 — Vérifier
 
-### 3.2 — Ce que fait le driver
+**Termes clés (référence rapide) :**
 
-- `vga_init()` — efface l'écran, curseur en (0,0) ;
-- `vga_set_color(fg, bg)` — change l'attribut courant ;
-- `vga_putchar(c)` — pose un caractère, gère `\n \r \t \b`, avance le curseur, **défile**
-  (scroll) quand on dépasse la 25ᵉ ligne (recopie lignes 1..24 → 0..23, vide la dernière) ;
-- `vga_write(s)` — boucle sur une chaîne C.
+- **Buffer texte VGA** — RAM mappée à `0xB8000` : 80×25 **cellules** de 2 octets, affichée par le matériel.
+- **Cellule** — `uint16_t` : octet bas = caractère (CP437), octet haut = **attribut** couleur.
+- **Attribut** — 1 octet : bits 0-3 = avant-plan, bits 4-6 = fond, bit 7 = clignotement.
+- **CP437** — le jeu de caractères de la VGA texte (ASCII + accents, semi-graphiques, etc.).
+- **Scroll** — quand le curseur dépasse la 25ᵉ ligne, on remonte tout d'une ligne.
 
-### 3.3 — Vérification
+---
+
+### 3.1 — Le buffer texte VGA, en détail
+
+Le matériel VGA en mode texte lit en continu une zone de RAM à **`0xB8000`** et l'affiche : une
+grille de **80 colonnes × 25 lignes**. Chaque case est une **cellule de 2 octets** :
+
+```
+ cellule = | octet 0 : caractère (code CP437) | octet 1 : attribut (couleur) |
+ adresse de la cellule (ligne y, colonne x) = 0xB8000 + (y * 80 + x) * 2
+```
+
+En C, on traite donc le buffer comme un tableau de `uint16_t` (2 octets) — un mot par cellule :
+
+```c
+#define VGA_MEM  ((volatile uint16_t *)0xB8000)
+#define COLS 80
+#define ROWS 25
+```
+
+> **Pourquoi `volatile` (rappel B2).** Le compilateur ne doit jamais « optimiser » nos
+> écritures : elles ont un effet de bord matériel (afficher). `volatile` le lui interdit.
+
+### 3.2 — L'octet d'attribut : encoder les couleurs
+
+L'octet haut de chaque cellule est l'**attribut**. La VGA texte a **16 couleurs** ; un attribut
+combine avant-plan (4 bits) et fond (3 ou 4 bits) :
+
+```
+ bit  7   6 5 4   3 2 1 0
+      │   └─┬─┘   └──┬──┘
+   clignote fond  avant-plan
+```
+
+D'où l'encodage `attribut = avant-plan | (fond << 4)`. On nomme les 16 couleurs dans un `enum`
+(`VGA_BLACK`=0 … `VGA_WHITE`=15) :
+
+```c
+void vga_set_color(enum vga_color fg, enum vga_color bg) {
+    color = (uint8_t)fg | (uint8_t)(bg << 4);
+}
+```
+
+Et une cellule se fabrique en collant caractère + attribut :
+
+```c
+static inline uint16_t cell(char c, uint8_t attr) {
+    return (uint16_t)(unsigned char)c | ((uint16_t)attr << 8);
+}
+```
+
+### 3.3 — L'API et l'état du driver
+
+`include/vga.h` expose le minimum utile, et le driver garde un petit **état global** (position
+du curseur + couleur courante) :
+
+```c
+void vga_init(void);                              /* efface, curseur (0,0) */
+void vga_set_color(enum vga_color fg, enum vga_color bg);
+void vga_putchar(char c);                         /* le cœur : pose + curseur + scroll */
+void vga_write(const char *s);                    /* boucle sur une chaîne C */
+```
+
+```c
+static size_t  row, col;     /* curseur logique */
+static uint8_t color;        /* attribut courant */
+```
+
+> **Freestanding, rappel.** Pas de `string.h`, pas de `stdio`. `vga_write` est juste
+> `while (*s) vga_putchar(*s++);`. Les types `uint16_t`/`size_t` viennent de `<stdint.h>` /
+> `<stddef.h>`, fournis par gcc même freestanding (en-têtes « autonomes »).
+
+### 3.4 — Effacer l'écran : `vga_init`
+
+Effacer = remplir les 80×25 cellules d'espaces avec la couleur courante, puis ramener le
+curseur en haut à gauche :
+
+```c
+void vga_init(void) {
+    vga_set_color(VGA_LIGHT_GREY, VGA_BLACK);
+    for (size_t y = 0; y < ROWS; y++)
+        for (size_t x = 0; x < COLS; x++)
+            VGA_MEM[y * COLS + x] = cell(' ', color);
+    row = col = 0;
+}
+```
+
+### 3.5 — `vga_putchar` : caractères de contrôle, curseur, retour à la ligne
+
+C'est le cœur du driver. Il distingue les **caractères de contrôle** (`\n \r \t \b`) du texte
+ordinaire, avance le curseur, gère le retour à la ligne en bout de colonne, et déclenche le
+défilement en bas d'écran :
+
+```c
+void vga_putchar(char c) {
+    switch (c) {
+    case '\n': col = 0; row++;            break;   /* nouvelle ligne */
+    case '\r': col = 0;                   break;   /* retour chariot */
+    case '\b': if (col) col--;            break;   /* effacement arrière */
+    case '\t': col = (col + 8) & ~(size_t)7; break;/* tabulation (multiple de 8) */
+    default:
+        VGA_MEM[row * COLS + col] = cell(c, color);
+        col++;
+    }
+    if (col >= COLS) { col = 0; row++; }           /* dépassement de colonne -> ligne suivante */
+    if (row >= ROWS) scroll();                     /* dépassement de ligne   -> défilement */
+}
+```
+
+> **Pourquoi `(col + 8) & ~7`.** C'est l'arrondi au multiple de 8 supérieur : les tabulations
+> tombent sur des colonnes 8, 16, 24… `& ~7` met à zéro les 3 bits bas.
+
+### 3.6 — Le défilement (scroll)
+
+Quand `row` atteint 25, on **remonte** les lignes 1→24 vers 0→23, on **vide** la dernière, et
+on garde le curseur sur cette dernière ligne :
+
+```c
+static void scroll(void) {
+    for (size_t y = 1; y < ROWS; y++)                       /* remonter d'une ligne */
+        for (size_t x = 0; x < COLS; x++)
+            VGA_MEM[(y - 1) * COLS + x] = VGA_MEM[y * COLS + x];
+    for (size_t x = 0; x < COLS; x++)                       /* vider la dernière */
+        VGA_MEM[(ROWS - 1) * COLS + x] = cell(' ', color);
+    row = ROWS - 1;
+}
+```
+
+> **C'est un défilement « logiciel ».** On recopie réellement la RAM vidéo. La VGA sait aussi
+> défiler « matériellement » (en décalant l'adresse de départ du balayage) — plus rapide, mais
+> plus subtil. Pour B3, la recopie est limpide et largement assez rapide.
+
+### 3.7 — La démo dans `kmain`
+
+`kmain` exerce tout le driver : un en-tête coloré, puis **30 lignes numérotées** — comme
+l'écran n'en montre que 25, les premières défilent hors champ (preuve du scroll) :
+
+```c
+void kmain(void) {
+    vga_init();
+    vga_set_color(VGA_LIGHT_GREEN, VGA_BLACK);
+    vga_write("naos B3: VGA driver online.\n");
+    vga_set_color(VGA_LIGHT_GREY, VGA_BLACK);
+    vga_write("Booted by GRUB via Multiboot; kmain() runs in 32-bit C.\n\n");
+
+    vga_set_color(VGA_LIGHT_CYAN, VGA_BLACK);
+    for (unsigned int i = 1; i <= 30; i++) {           /* 30 > 25 -> ça défile */
+        vga_write("  line "); put_uint(i); vga_putchar('\n');
+    }
+    vga_set_color(VGA_LIGHT_GREEN, VGA_BLACK);
+    vga_write("\nnaos B3: scroll OK.");
+    for (;;) __asm__ volatile ("hlt");
+}
+```
+
+`put_uint` est un mini-`itoa` local (pas de `printf` en freestanding) : il imprime un entier en
+décomposant ses chiffres. Un vrai `printf`-like viendra plus tard.
+
+### 3.8 — Vérifier
 
 ```bash
-make run                      # ou make run-kernel
+make run                      # ou make run-kernel pour itérer vite
 make run QMP=1                # (autre terminal) python3 tools/qemu-shot.py
 ```
 
-`kmain` imprime un en-tête coloré puis 30 lignes numérotées : comme l'écran fait 25 lignes,
-les premières **défilent** hors champ. Critère B3 : texte formaté + défilement visibles.
+Attendu : un en-tête vert/gris, puis des lignes cyan numérotées dont les premières ont
+**défilé** hors de l'écran, et « naos B3: scroll OK. » en bas. Texte **formaté + couleurs +
+défilement** : **critère B3 atteint.**
 
 > **Suite (B3+) — la police.** Remplacer la police CP437 de la ROM par la nôtre (cf.
 > `tools/vgafont.py`, `assets/fonts/ibm_vga_8x16.bin`) se fait en écrivant dans le générateur
