@@ -39,7 +39,9 @@ global _start
 extern kmain
 _start:
     mov esp, stack_top                 ; install the stack (grows downward)
-    call kmain                         ; -> C ; should not return
+    push ebx                           ; Multiboot info pointer (GRUB/QEMU set ebx)
+    push eax                           ; Multiboot magic (eax = 0x2BADB002)
+    call kmain                         ; kmain(uint32_t magic, uint32_t mb_info)
 .hang:
     cli
     hlt                                ; if kmain returns: halt for good

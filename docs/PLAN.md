@@ -62,7 +62,7 @@ Chaque brique : théorie → code → vérification observable dans QEMU.
 | B4 | GDT propre (kernel) | Segmentation, descripteurs | GDT rechargée, pas de triple-fault | ✅ |
 | B5 | IDT + interruptions | IDT, PIC, exceptions CPU (ISR/IRQ) | Division par zéro → handler | ✅ |
 | B6 | Clavier + timer | IRQ matérielles, ports I/O (`inb`/`outb`), PS/2, PIT | Saisie clavier affichée + tics timer | ✅ |
-| B7 | Mémoire physique | Détection RAM (memmap Multiboot), allocateur de frames | Allouer/libérer une page | ❌ |
+| B7 | Mémoire physique | Détection RAM (memmap Multiboot), allocateur de frames | Allouer/libérer une page | ✅ |
 | B8 | Paging (mémoire virtuelle) | Tables de pages, `CR3`, page faults | Adressage virtuel + higher-half | ❌ |
 | B9 | Heap kernel | `kmalloc`/`kfree` | Allocation dynamique fiable | ❌ |
 | B10 | Multitâche | Pile par tâche, context switch, ordonnanceur | Deux tâches alternent à l'écran | ❌ |

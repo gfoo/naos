@@ -19,6 +19,7 @@ under [`howto/`](howto/) (easier to read and maintain):
 | 4 | B4 — kernel-owned GDT | [howto/04-gdt.md](howto/04-gdt.md) |
 | 5 | B5 — IDT + CPU exceptions | [howto/05-idt.md](howto/05-idt.md) |
 | 6 | B6 — keyboard + timer (IRQs) | [howto/06-keyboard-timer.md](howto/06-keyboard-timer.md) |
+| 7 | B7 — physical memory | [howto/07-pmm.md](howto/07-pmm.md) |
 | — | Appendices A (x86 asm) · B (`boot.asm` line by line) · C (`int 0x10`) | [howto/annexes.md](howto/annexes.md) |
 
 On this page: [Goal](#goal) · [Prerequisites](#prerequisites) ·
@@ -84,7 +85,7 @@ concepts and criteria.
 | [4](howto/04-gdt.md) | B4 — Proper GDT (kernel) | ✅ done |
 | [5](howto/05-idt.md) | B5 — IDT + CPU exceptions | ✅ done |
 | [6](howto/06-keyboard-timer.md) | B6 — Keyboard + timer | ✅ done |
-| 7  | B7 — Physical memory | planned |
+| [7](howto/07-pmm.md) | B7 — Physical memory | ✅ done |
 | 8  | B8 — Paging (virtual memory) | planned |
 | 9  | B9 — Kernel heap | planned |
 | 10 | B10 — Multitasking | planned |
