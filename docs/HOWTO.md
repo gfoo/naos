@@ -21,6 +21,7 @@ under [`howto/`](howto/) (easier to read and maintain):
 | 6 | B6 — keyboard + timer (IRQs) | [howto/06-keyboard-timer.md](howto/06-keyboard-timer.md) |
 | 7 | B7 — physical memory | [howto/07-pmm.md](howto/07-pmm.md) |
 | 8 | B8 — paging (virtual memory) | [howto/08-paging.md](howto/08-paging.md) |
+| 9 | B9 — kernel heap (kmalloc/kfree) | [howto/09-heap.md](howto/09-heap.md) |
 | — | Appendices A (x86 asm) · B (`boot.asm` line by line) · C (`int 0x10`) | [howto/annexes.md](howto/annexes.md) |
 
 On this page: [Goal](#goal) · [Prerequisites](#prerequisites) ·
@@ -88,7 +89,7 @@ concepts and criteria.
 | [6](howto/06-keyboard-timer.md) | B6 — Keyboard + timer | ✅ done |
 | [7](howto/07-pmm.md) | B7 — Physical memory | ✅ done |
 | [8](howto/08-paging.md) | B8 — Paging (virtual memory) | ✅ done |
-| 9  | B9 — Kernel heap | planned |
+| [9](howto/09-heap.md) | B9 — Kernel heap | ✅ done |
 | 10 | B10 — Multitasking | planned |
 
 ---
