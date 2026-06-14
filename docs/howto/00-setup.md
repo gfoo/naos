@@ -19,6 +19,7 @@ comes in B1 and B2. Here, we set the stage and get a boot sector to print one li
 - 0.4 — Display in depth (the great forgotten one)
 - 0.5 — Reading the binary with `hexdump`
 - 0.6 — Verify in QEMU
+- 0.7 — On ARM (AArch64): the same brick, a different world
 
 **Key terms (quick reference):**
 
