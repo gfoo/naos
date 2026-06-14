@@ -36,7 +36,8 @@ B2_OBJS := $(BUILD)/boot.o $(BUILD)/kmain.b2.o
 B3_OBJS := $(BUILD)/boot.o $(BUILD)/kmain.b3.o $(BUILD)/vga.o
 B4_OBJS := $(BUILD)/boot.o $(BUILD)/kmain.b4.o $(BUILD)/vga.o $(BUILD)/gdt.o $(BUILD)/gdt_flush.o
 B5_OBJS := $(BUILD)/boot.o $(BUILD)/kmain.b5.o $(BUILD)/vga.o $(BUILD)/gdt.o $(BUILD)/gdt_flush.o \
-           $(BUILD)/idt.o $(BUILD)/isr.o $(BUILD)/isr_stubs.o
+           $(BUILD)/idt.b5.o $(BUILD)/isr.o $(BUILD)/isr_stubs.o
+# (idt.b5.o = idt without the IRQ gates, B6's idt.c added refs to irq0..15)
 B6_OBJS := $(BUILD)/boot.o $(BUILD)/kmain.b6.o $(BUILD)/vga.o $(BUILD)/gdt.o $(BUILD)/gdt_flush.o \
            $(BUILD)/idt.o $(BUILD)/isr.o $(BUILD)/isr_stubs.o \
            $(BUILD)/pic.o $(BUILD)/irq.o $(BUILD)/irq_stubs.o $(BUILD)/timer.o $(BUILD)/keyboard.o
