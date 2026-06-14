@@ -1,44 +1,46 @@
-; naos — B0 : boot sector minimal
+; naos — B2/B3 : en-tête Multiboot + stub ASM -> kmain (C)
 ; -----------------------------------------------------------------------------
-; But : prouver que la chaîne de build fonctionne (NASM -> binaire plat -> image
-; -> QEMU). On affiche un message via le BIOS, puis on arrête le CPU.
+; À partir de B2, on ne fait plus le boot sector à la main (cf. B1, conservé dans
+; boot/boot.asm.b1). On délègue le démarrage à GRUB via la spec Multiboot 1 :
+; GRUB nous charge en mode protégé 32 bits (A20 + GDT + PE déjà faits), à 1 Mo.
 ;
-; Le BIOS charge ce secteur (512 octets) à l'adresse 0x7C00 et y saute, alors
-; que le CPU est en real mode 16 bits. Le mode protégé, la GDT, etc. : c'est B1.
+; Ce fichier fournit trois choses :
+;   1. l'EN-TÊTE MULTIBOOT, que GRUB cherche dans les 8 premiers Ko du binaire ;
+;   2. une PILE (la spec Multiboot ne garantit pas d'esp utilisable) ;
+;   3. le point d'entrée _start, qui appelle kmain() (notre code C).
 ;
-; Explication ligne par ligne + rappels d'assembleur x86 :
-;   docs/HOWTO.md, section « Annexes » (A : rappels x86 ; B : ce fichier commenté).
+; Assemblé en ELF32 (-f elf32), lié par linker.ld. Voir docs/HOWTO.md §2.
 
-bits 16                 ; le CPU démarre en real mode (16 bits)
-org  0x7C00             ; le BIOS charge ce secteur à 0x7C00 -> on s'aligne dessus
+bits 32
 
-start:
-    cli                 ; pas d'interruptions pendant qu'on installe les segments
-    xor ax, ax          ; AX = 0
-    mov ds, ax          ; DS = ES = SS = 0 : adressage simple, segments à zéro
-    mov es, ax
-    mov ss, ax
-    mov sp, 0x7C00      ; pile juste sous notre code (croît vers le bas)
-    sti                 ; on réautorise les interruptions (le BIOS en a besoin)
+; --- en-tête Multiboot 1 ---
+MB_ALIGN    equ 1 << 0                 ; modules alignés sur des pages
+MB_MEMINFO  equ 1 << 1                 ; fournir la carte mémoire (memmap)
+MB_FLAGS    equ MB_ALIGN | MB_MEMINFO
+MB_MAGIC    equ 0x1BADB002             ; nombre magique reconnu par GRUB
+MB_CHECKSUM equ -(MB_MAGIC + MB_FLAGS) ; magic + flags + checksum doit faire 0
 
-    mov si, msg         ; SI pointe sur la chaîne à afficher
-.print:
-    lodsb               ; AL = [DS:SI], puis SI++
-    test al, al         ; octet nul ? -> fin de chaîne
-    jz .hang
-    mov ah, 0x0E        ; int 0x10, fonction 0x0E = téléscripteur (affiche AL)
-    mov bh, 0x00        ; page vidéo 0
-    int 0x10            ; service BIOS d'affichage
-    jmp .print
+section .multiboot
+align 4
+    dd MB_MAGIC
+    dd MB_FLAGS
+    dd MB_CHECKSUM
 
+; --- pile : 16 Kio dans la BSS (non initialisée) ---
+section .bss
+align 16
+stack_bottom:
+    resb 16384
+stack_top:
+
+; --- point d'entrée ---
+section .text
+global _start
+extern kmain
+_start:
+    mov esp, stack_top                 ; installer la pile (croît vers le bas)
+    call kmain                         ; -> C ; ne devrait pas revenir
 .hang:
-    hlt                 ; arrête le CPU jusqu'à la prochaine interruption
-    jmp .hang           ; si réveillé, on se rendort : boucle d'arrêt propre
-
-msg db "naos B0: it boots!", 13, 10, 0   ; 13,10 = CR LF ; 0 = fin de chaine
-
-; -----------------------------------------------------------------------------
-; Remplissage jusqu'à 510 octets, puis signature de boot obligatoire (0xAA55).
-; Sans cette signature aux offsets 510-511, le BIOS déclare le disque non-bootable.
-times 510-($-$$) db 0   ; padding : zéros jusqu'à l'octet 510
-dw 0xAA55               ; signature little-endian -> octets 0x55 0xAA
+    cli
+    hlt                                ; si kmain revient : arrêt définitif
+    jmp .hang
