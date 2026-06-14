@@ -716,6 +716,16 @@ mode protégé 32 bits  (première instruction « bits 32 »)
 > bascule, le CPU chercherait un gestionnaire inexistant → faute → faute → **triple fault** →
 > reset. On coupe donc les interruptions (`cli`) et on ne les rallumera qu'en B5.
 
+> **Qui définit ces étapes ?** Deux familles. La GDT/`lgdt` (3), le bit `CR0.PE` (4) et le far
+> jump (5) — ainsi que le `cli` (1) — forment la **séquence canonique définie par Intel** :
+> architecture x86, *Intel SDM* Vol. 3A §9.9 « Switching to Protected Mode » (mode protégé
+> introduit avec le 80286 en 1982). Le CPU lit ces structures en matériel. **L'A20 (2) est
+> l'intrus** : elle n'existe *pas* dans l'architecture du CPU. C'est un greffon historique de la
+> **plateforme PC** — besoin créé par **IBM** (PC AT, 1984, pour préserver le *wrap-around* du
+> 8086), activé selon les machines via le contrôleur clavier 8042, le port `0x92` (« Fast
+> A20 ») ou `int 0x15`. D'où l'absence de méthode unique : 3/4/5 sont propres parce qu'Intel les
+> normalise, A20 est sale parce que c'est de l'archéologie IBM/chipset.
+
 ### 1.3 — A20 : la ligne d'adresse oubliée
 
 Sur le 8086, le calcul `segment × 16 + offset` pouvait dépasser `0xFFFFF` (1 Mo) ; ça
